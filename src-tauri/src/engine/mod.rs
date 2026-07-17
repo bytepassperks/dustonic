@@ -640,6 +640,10 @@ fn is_safe_path(path: &Path, app_data: &Path) -> bool {
             PathBuf::from(r"C:\"),
             PathBuf::from(r"C:\Windows"),
             PathBuf::from(r"C:\Windows\System32"),
+            PathBuf::from(r"C:\Users"),
+            PathBuf::from(r"C:\Program Files"),
+            PathBuf::from(r"C:\Program Files (x86)"),
+            PathBuf::from(r"C:\ProgramData"),
         ]
     } else {
         vec![
@@ -648,8 +652,23 @@ fn is_safe_path(path: &Path, app_data: &Path) -> bool {
             PathBuf::from("/usr"),
             PathBuf::from("/etc"),
             PathBuf::from("/bin"),
+            PathBuf::from("/boot"),
+            PathBuf::from("/lib"),
+            PathBuf::from("/lib64"),
+            PathBuf::from("/opt"),
+            PathBuf::from("/root"),
+            PathBuf::from("/sbin"),
+            PathBuf::from("/sys"),
+            PathBuf::from("/proc"),
+            PathBuf::from("/var"),
+            PathBuf::from("/dev"),
         ]
     };
+    if let Some(home) = home_dir() {
+        if normalized == lexical_normalize(&home) {
+            return false;
+        }
+    }
     if normalized == lexical_normalize(app_data)
         || normalized.starts_with(lexical_normalize(app_data))
     {
@@ -756,6 +775,12 @@ mod tests {
         let (_, engine) = fixture();
         assert!(!is_safe_path(Path::new("/"), &engine.app_data));
         assert!(!is_safe_path(Path::new("/home"), &engine.app_data));
+        let home = home_dir().expect("test environment should have a home directory");
+        assert!(!is_safe_path(&home, &engine.app_data));
+        assert!(is_safe_path(
+            &home.join(".cache").join("dustonic-test"),
+            &engine.app_data
+        ));
         assert!(!is_safe_path(&engine.app_data, &engine.app_data));
         assert!(is_safe_path(
             Path::new("/tmp/dustonic-safe"),
