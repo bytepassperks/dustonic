@@ -1,0 +1,1 @@
+{"name":"dustonic-website","version":"1.0.0","private":true,"description":"Dustonic PC cleaner website and license portal","type":"module","engines":{"node":">=18"},"scripts":{"start":"node server.js","dev":"node server.js","test":"node --test test/*.test.mjs"},"dependencies":{"compression":"^1.7.4","express":"^4.21.2"}}
