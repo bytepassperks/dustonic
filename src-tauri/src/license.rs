@@ -8,16 +8,18 @@ use std::{
 const LICENSE_FILE: &str = "license.json";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const PRODUCT_CONFIG: &str = include_str!("../../config/product.json");
+const DEFAULT_LICENSE_VALIDATE_URL: &str = "https://dustonic.com/api/license/validate";
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProductConfig {
     license_validate_url: String,
 }
 
 fn validation_url() -> String {
     serde_json::from_str::<ProductConfig>(PRODUCT_CONFIG)
-        .expect("product config must be valid")
-        .license_validate_url
+        .map(|config| config.license_validate_url)
+        .unwrap_or_else(|_| DEFAULT_LICENSE_VALIDATE_URL.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,6 +321,14 @@ mod tests {
         assert_eq!(
             mask_key("DUST-ABCDE-FGHIJ-KLMNO-PQRST"),
             "DUST-•••••-•••••-•••••-PQRST"
+        );
+    }
+
+    #[test]
+    fn product_config_provides_license_validation_url() {
+        assert_eq!(
+            validation_url(),
+            "https://dustonic.com/api/license/validate"
         );
     }
 }
