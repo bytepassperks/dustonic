@@ -77,6 +77,59 @@ fn empty_trash() -> Result<(), String> {
     engine::empty_trash()
 }
 
+#[tauri::command]
+fn analyze_disk(app: AppHandle, path: Option<String>) -> Result<Vec<engine::DiskEntry>, String> {
+    engine::analyze_disk(app_data(&app)?, path)
+}
+
+#[tauri::command]
+fn find_large_files(
+    app: AppHandle,
+    path: Option<String>,
+    min_bytes: u64,
+) -> Result<Vec<engine::LargeFile>, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    engine::find_large_files(data_dir, path, min_bytes, entitlements)
+}
+
+#[tauri::command]
+fn find_duplicates(
+    app: AppHandle,
+    path: Option<String>,
+) -> Result<Vec<engine::DuplicateGroup>, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    engine::find_duplicates(data_dir, path, entitlements)
+}
+
+#[tauri::command]
+fn quarantine_paths(
+    app: AppHandle,
+    paths: Vec<String>,
+    keep_paths: Vec<String>,
+) -> Result<engine::CleanReport, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    if !entitlements.large_file_finder {
+        return Err(license::error_code("PRO_REQUIRED", None));
+    }
+    engine::quarantine_paths(data_dir, paths, keep_paths)
+}
+
+#[tauri::command]
+fn quarantine_duplicate_files(
+    app: AppHandle,
+    selections: Vec<engine::DuplicateRemoval>,
+) -> Result<engine::CleanReport, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    if !entitlements.duplicate_finder {
+        return Err(license::error_code("PRO_REQUIRED", None));
+    }
+    engine::quarantine_duplicate_files(data_dir, selections)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -102,7 +155,12 @@ pub fn run() {
             empty_trash,
             get_license_status,
             activate_license,
-            deactivate_license
+            deactivate_license,
+            analyze_disk,
+            find_large_files,
+            find_duplicates,
+            quarantine_paths,
+            quarantine_duplicate_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dustonic");

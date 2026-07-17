@@ -3,7 +3,7 @@ use dirs::home_dir;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -104,6 +104,36 @@ pub struct SystemStats {
     pub memory_total: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DiskEntry {
+    pub name: String,
+    pub path: String,
+    pub bytes: u64,
+    pub percent: f64,
+    pub is_directory: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LargeFile {
+    pub path: String,
+    pub bytes: u64,
+    pub modified: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DuplicateGroup {
+    pub size: u64,
+    pub count: usize,
+    pub files: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DuplicateRemoval {
+    pub group: Vec<String>,
+    pub remove: Vec<String>,
+    pub keep: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ManifestEntry {
     original: String,
@@ -158,6 +188,176 @@ impl Engine {
             platform,
             categories,
         }
+    }
+
+    fn analyze_disk(&self, root: Option<&str>) -> Result<Vec<DiskEntry>, String> {
+        let root = analysis_root(root)?;
+        if !root.is_dir() {
+            return Err("Disk analyzer target must be a directory".into());
+        }
+        let children = fs::read_dir(&root).map_err(|error| error.to_string())?;
+        let mut entries = Vec::new();
+        for child in children.flatten() {
+            let path = child.path();
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            let bytes = if metadata.is_dir() {
+                item_size(&path).unwrap_or(0)
+            } else if metadata.is_file() {
+                metadata.len()
+            } else {
+                continue;
+            };
+            entries.push((path, bytes, metadata.is_dir()));
+        }
+        let total: u64 = entries.iter().map(|(_, bytes, _)| *bytes).sum();
+        let mut result: Vec<_> = entries
+            .into_iter()
+            .map(|(path, bytes, is_directory)| DiskEntry {
+                name: path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string()),
+                path: path.display().to_string(),
+                bytes,
+                percent: if total == 0 {
+                    0.0
+                } else {
+                    (bytes as f64 / total as f64) * 100.0
+                },
+                is_directory,
+            })
+            .collect();
+        result.sort_by(|left, right| {
+            right
+                .bytes
+                .cmp(&left.bytes)
+                .then(left.name.cmp(&right.name))
+        });
+        Ok(result)
+    }
+
+    fn find_large_files(
+        &self,
+        root: Option<&str>,
+        min_bytes: u64,
+        entitlements: &Entitlements,
+    ) -> Result<Vec<LargeFile>, String> {
+        require_entitlement(entitlements.large_file_finder)?;
+        let root = analysis_root(root)?;
+        if !root.is_dir() {
+            return Err("Large-file finder target must be a directory".into());
+        }
+        let mut files = Vec::new();
+        for entry in WalkDir::new(&root)
+            .follow_links(false)
+            .into_iter()
+            .flatten()
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let metadata = match fs::symlink_metadata(entry.path()) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.len() < min_bytes {
+                continue;
+            }
+            files.push(LargeFile {
+                path: entry.path().display().to_string(),
+                bytes: metadata.len(),
+                modified: metadata
+                    .modified()
+                    .ok()
+                    .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_secs()),
+            });
+        }
+        files.sort_by(|left, right| {
+            right
+                .bytes
+                .cmp(&left.bytes)
+                .then(left.path.cmp(&right.path))
+        });
+        files.truncate(200);
+        Ok(files)
+    }
+
+    fn find_duplicates(
+        &self,
+        root: Option<&str>,
+        entitlements: &Entitlements,
+    ) -> Result<Vec<DuplicateGroup>, String> {
+        require_entitlement(entitlements.duplicate_finder)?;
+        let root = analysis_root(root)?;
+        if !root.is_dir() {
+            return Err("Duplicate finder target must be a directory".into());
+        }
+        let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+        for entry in WalkDir::new(&root)
+            .follow_links(false)
+            .into_iter()
+            .flatten()
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let metadata = match fs::symlink_metadata(entry.path()) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            by_size
+                .entry(metadata.len())
+                .or_default()
+                .push(entry.path().to_path_buf());
+        }
+        let mut by_hash: HashMap<(u64, [u8; 32]), Vec<PathBuf>> = HashMap::new();
+        for (size, paths) in by_size.into_iter().filter(|(_, paths)| paths.len() > 1) {
+            for path in paths {
+                let mut file = match fs::File::open(&path) {
+                    Ok(file) => file,
+                    Err(_) => continue,
+                };
+                let mut hasher = blake3::Hasher::new();
+                if io::copy(&mut file, &mut hasher).is_err() {
+                    continue;
+                }
+                by_hash
+                    .entry((size, *hasher.finalize().as_bytes()))
+                    .or_default()
+                    .push(path);
+            }
+        }
+        let mut groups: Vec<_> = by_hash
+            .into_values()
+            .filter(|paths| paths.len() > 1)
+            .map(|mut paths| {
+                paths.sort();
+                DuplicateGroup {
+                    size: fs::symlink_metadata(&paths[0])
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0),
+                    count: paths.len(),
+                    files: paths
+                        .into_iter()
+                        .map(|path| path.display().to_string())
+                        .collect(),
+                }
+            })
+            .collect();
+        groups.sort_by(|left, right| {
+            right
+                .size
+                .cmp(&left.size)
+                .then(left.files[0].cmp(&right.files[0]))
+        });
+        Ok(groups)
     }
 
     fn selected_rules(
@@ -335,6 +535,100 @@ impl Engine {
         Ok(report)
     }
 
+    fn quarantine_paths(
+        &self,
+        paths: &[String],
+        keep_paths: &[String],
+    ) -> Result<CleanReport, String> {
+        let keep: HashSet<_> = keep_paths.iter().map(PathBuf::from).collect();
+        let mut unique = HashSet::new();
+        let mut items = Vec::new();
+        for value in paths {
+            let path = PathBuf::from(value);
+            if !unique.insert(path.clone()) {
+                continue;
+            }
+            if keep.contains(&path)
+                || !is_safe_path(&path, &self.app_data)
+                || !is_regular_file(&path)
+            {
+                return Err(format!(
+                    "Refusing to quarantine unsafe file: {}",
+                    path.display()
+                ));
+            }
+            items.push(path);
+        }
+        self.quarantine_items(&items)
+    }
+
+    fn quarantine_duplicate_files(
+        &self,
+        selections: &[DuplicateRemoval],
+    ) -> Result<CleanReport, String> {
+        let mut paths = Vec::new();
+        let mut keeps = Vec::new();
+        for selection in selections {
+            let group: HashSet<_> = selection.group.iter().map(PathBuf::from).collect();
+            let remove: HashSet<_> = selection.remove.iter().map(PathBuf::from).collect();
+            let keep = PathBuf::from(&selection.keep);
+            if group.len() < 2
+                || !group.contains(&keep)
+                || remove.contains(&keep)
+                || remove.is_empty()
+                || remove.len() >= group.len()
+                || !remove.is_subset(&group)
+            {
+                return Err("Duplicate cleanup must keep at least one copy".into());
+            }
+            keeps.push(selection.keep.clone());
+            paths.extend(selection.remove.iter().cloned());
+        }
+        self.quarantine_paths(&paths, &keeps)
+    }
+
+    fn quarantine_items(&self, items: &[PathBuf]) -> Result<CleanReport, String> {
+        let quarantine_id = Utc::now().format("%Y%m%d%H%M%S%3f").to_string();
+        let quarantine_dir = self.app_data.join("quarantine").join(&quarantine_id);
+        fs::create_dir_all(&quarantine_dir).map_err(|e| e.to_string())?;
+        let mut entries = Vec::new();
+        let mut report = CleanReport {
+            bytes_freed: 0,
+            items: 0,
+            skipped: 0,
+            quarantine_id: Some(quarantine_id.clone()),
+        };
+        for item in items {
+            if !is_safe_path(item, &self.app_data) || !is_regular_file(item) {
+                report.skipped += 1;
+                continue;
+            }
+            let destination = quarantine_dir.join(format!("item-{}", entries.len()));
+            let bytes = item_size(item).unwrap_or(0);
+            match fs::rename(item, &destination) {
+                Ok(()) => {
+                    entries.push(ManifestEntry {
+                        original: item.display().to_string(),
+                        quarantined: destination.display().to_string(),
+                    });
+                    report.items += 1;
+                    report.bytes_freed += bytes;
+                }
+                Err(_) => report.skipped += 1,
+            }
+        }
+        let manifest = Manifest {
+            id: quarantine_id,
+            entries,
+        };
+        fs::write(
+            quarantine_dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(report)
+    }
+
     fn restore_last(&self) -> Result<CleanReport, String> {
         let Some(dir) = latest_quarantine(&self.app_data) else {
             return Ok(CleanReport {
@@ -410,6 +704,42 @@ pub fn empty_quarantine(app_data: PathBuf) -> Result<(), String> {
     Engine::new(app_data).empty_quarantine()
 }
 
+pub fn analyze_disk(app_data: PathBuf, root: Option<String>) -> Result<Vec<DiskEntry>, String> {
+    Engine::new(app_data).analyze_disk(root.as_deref())
+}
+
+pub fn find_large_files(
+    app_data: PathBuf,
+    root: Option<String>,
+    min_bytes: u64,
+    entitlements: Entitlements,
+) -> Result<Vec<LargeFile>, String> {
+    Engine::new(app_data).find_large_files(root.as_deref(), min_bytes, &entitlements)
+}
+
+pub fn find_duplicates(
+    app_data: PathBuf,
+    root: Option<String>,
+    entitlements: Entitlements,
+) -> Result<Vec<DuplicateGroup>, String> {
+    Engine::new(app_data).find_duplicates(root.as_deref(), &entitlements)
+}
+
+pub fn quarantine_paths(
+    app_data: PathBuf,
+    paths: Vec<String>,
+    keep_paths: Vec<String>,
+) -> Result<CleanReport, String> {
+    Engine::new(app_data).quarantine_paths(&paths, &keep_paths)
+}
+
+pub fn quarantine_duplicate_files(
+    app_data: PathBuf,
+    selections: Vec<DuplicateRemoval>,
+) -> Result<CleanReport, String> {
+    Engine::new(app_data).quarantine_duplicate_files(&selections)
+}
+
 pub fn stats() -> SystemStats {
     let mut system = System::new();
     system.refresh_memory();
@@ -448,6 +778,21 @@ fn current_platform() -> &'static str {
         "macOS"
     } else {
         "Linux"
+    }
+}
+
+fn analysis_root(root: Option<&str>) -> Result<PathBuf, String> {
+    match root {
+        Some(root) if !root.trim().is_empty() => Ok(PathBuf::from(root)),
+        _ => home_dir().ok_or("Could not determine the user home directory".into()),
+    }
+}
+
+fn require_entitlement(enabled: bool) -> Result<(), String> {
+    if enabled {
+        Ok(())
+    } else {
+        Err(license::error_code("PRO_REQUIRED", None))
     }
 }
 
@@ -864,6 +1209,95 @@ mod tests {
         let report = engine.clean_rules(&[rule], true).unwrap();
         assert_eq!(report.items, 1);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn disk_analyzer_sorts_immediate_children_and_reports_percentages() {
+        let (temp, engine) = fixture();
+        fs::write(temp.path().join("small.txt"), b"12").unwrap();
+        let entries = engine
+            .analyze_disk(Some(temp.path().to_str().unwrap()))
+            .unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "cache");
+        assert_eq!(entries[0].bytes, 12);
+        assert_eq!(entries[1].name, "small.txt");
+        assert!((entries.iter().map(|entry| entry.percent).sum::<f64>() - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn large_file_finder_filters_by_threshold() {
+        let (temp, engine) = fixture();
+        fs::write(temp.path().join("large.bin"), vec![0_u8; 20]).unwrap();
+        fs::write(temp.path().join("tiny.bin"), vec![0_u8; 3]).unwrap();
+        let files = engine
+            .find_large_files(
+                Some(temp.path().to_str().unwrap()),
+                10,
+                &Entitlements::pro(),
+            )
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].path,
+            temp.path().join("large.bin").display().to_string()
+        );
+        let error = engine
+            .find_large_files(
+                Some(temp.path().to_str().unwrap()),
+                10,
+                &Entitlements::free(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&error).unwrap()["code"],
+            "PRO_REQUIRED"
+        );
+    }
+
+    #[test]
+    fn duplicate_finder_groups_identical_files_only() {
+        let (temp, engine) = fixture();
+        let duplicate_a = temp.path().join("duplicate-a.bin");
+        let duplicate_b = temp.path().join("duplicate-b.bin");
+        let unique = temp.path().join("unique.bin");
+        fs::write(&duplicate_a, b"same content").unwrap();
+        fs::write(&duplicate_b, b"same content").unwrap();
+        fs::write(&unique, b"different!").unwrap();
+        let groups = engine
+            .find_duplicates(Some(temp.path().to_str().unwrap()), &Entitlements::pro())
+            .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].count, 2);
+        assert!(groups[0].files.contains(&duplicate_a.display().to_string()));
+        assert!(groups[0].files.contains(&duplicate_b.display().to_string()));
+        assert!(!groups[0].files.contains(&unique.display().to_string()));
+    }
+
+    #[test]
+    fn duplicate_cleanup_requires_one_copy_to_remain() {
+        let (temp, engine) = fixture();
+        let first = temp.path().join("first.bin");
+        let second = temp.path().join("second.bin");
+        fs::write(&first, b"same").unwrap();
+        fs::write(&second, b"same").unwrap();
+        let selection = DuplicateRemoval {
+            group: vec![first.display().to_string(), second.display().to_string()],
+            remove: vec![first.display().to_string(), second.display().to_string()],
+            keep: first.display().to_string(),
+        };
+        assert!(engine.quarantine_duplicate_files(&[selection]).is_err());
+        let selection = DuplicateRemoval {
+            group: vec![first.display().to_string(), second.display().to_string()],
+            remove: vec![second.display().to_string()],
+            keep: first.display().to_string(),
+        };
+        let report = engine.quarantine_duplicate_files(&[selection]).unwrap();
+        assert_eq!(report.items, 1);
+        assert!(first.exists());
+        assert!(!second.exists());
+        assert_eq!(engine.restore_last().unwrap().items, 1);
+        assert!(second.exists());
     }
 
     fn env_lock() -> &'static Mutex<()> {

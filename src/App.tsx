@@ -1,15 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  BarChart3,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  FileSearch,
+  Files,
+  FolderOpen,
   HardDrive,
   Info,
   LayoutDashboard,
-  Lightbulb,
   LoaderCircle,
   LockKeyhole,
   Moon,
@@ -86,7 +89,27 @@ type LicenseStatus = {
   entitlements: Entitlements;
 };
 type Busy = "loading" | "scanning" | "cleaning" | "restoring" | null;
-type Screen = "clean" | "license" | "settings";
+type Screen = "clean" | "analyzer" | "large" | "duplicates" | "license" | "settings";
+type DiskEntry = {
+  name: string;
+  path: string;
+  bytes: number;
+  percent: number;
+  is_directory: boolean;
+};
+type LargeFile = { path: string; bytes: number; modified: number | null };
+type DuplicateGroup = { size: number; count: number; files: string[] };
+type DuplicateRemoval = { group: string[]; remove: string[]; keep: string };
+
+const screenLabel = (screen: Screen) =>
+  ({
+    clean: "Clean",
+    analyzer: "Disk analyzer",
+    large: "Large files",
+    duplicates: "Duplicates",
+    license: "Pro",
+    settings: "Settings",
+  })[screen];
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -134,6 +157,17 @@ export default function App() {
   const [licenseKey, setLicenseKey] = useState("");
   const [busy, setBusy] = useState<Busy>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [analyzerPath, setAnalyzerPath] = useState("");
+  const [analyzerEntries, setAnalyzerEntries] = useState<DiskEntry[] | null>(null);
+  const [largePath, setLargePath] = useState("");
+  const [largeThreshold, setLargeThreshold] = useState(100);
+  const [largeFiles, setLargeFiles] = useState<LargeFile[] | null>(null);
+  const [selectedLarge, setSelectedLarge] = useState<string[]>([]);
+  const [duplicatePath, setDuplicatePath] = useState("");
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[] | null>(null);
+  const [duplicateKeep, setDuplicateKeep] = useState<Record<number, string>>({});
+  const [duplicateRemoved, setDuplicateRemoved] = useState<Record<number, string[]>>({});
+  const [finderCleaned, setFinderCleaned] = useState<CleanReport | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -206,7 +240,9 @@ export default function App() {
     setError(null);
     setBusy("restoring");
     try {
-      setCleaned(await invoke<CleanReport>("restore_last_quarantine"));
+      const restored = await invoke<CleanReport>("restore_last_quarantine");
+      setCleaned(restored);
+      setFinderCleaned(restored);
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
       setError(displayError(reason));
@@ -238,6 +274,110 @@ export default function App() {
       setBusy(null);
     }
   };
+  const analyzeDisk = async (path = analyzerPath) => {
+    setError(null);
+    setFinderCleaned(null);
+    setBusy("scanning");
+    try {
+      setAnalyzerPath(path);
+      setAnalyzerEntries(await invoke<DiskEntry[]>("analyze_disk", { path: path || null }));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const findLargeFiles = async () => {
+    setError(null);
+    setFinderCleaned(null);
+    setBusy("scanning");
+    try {
+      const files = await invoke<LargeFile[]>("find_large_files", {
+        path: largePath || null,
+        minBytes: largeThreshold * 1024 * 1024,
+      });
+      setLargeFiles(files);
+      setSelectedLarge([]);
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const findDuplicates = async () => {
+    setError(null);
+    setFinderCleaned(null);
+    setBusy("scanning");
+    try {
+      const groups = await invoke<DuplicateGroup[]>("find_duplicates", {
+        path: duplicatePath || null,
+      });
+      setDuplicateGroups(groups);
+      setDuplicateKeep(Object.fromEntries(groups.map((group, index) => [index, group.files[0]])));
+      setDuplicateRemoved(
+        Object.fromEntries(groups.map((group, index) => [index, group.files.slice(1)])),
+      );
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const removeLargeFiles = async () => {
+    if (selectedLarge.length === 0) return;
+    setError(null);
+    setBusy("cleaning");
+    try {
+      setFinderCleaned(
+        await invoke<CleanReport>("quarantine_paths", {
+          paths: selectedLarge,
+          keepPaths: [],
+        }),
+      );
+      setLargeFiles((files) => files?.filter((file) => !selectedLarge.includes(file.path)) ?? null);
+      setSelectedLarge([]);
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const removeDuplicates = async () => {
+    if (!duplicateGroups) return;
+    const selections: DuplicateRemoval[] = duplicateGroups.flatMap((group, index) => {
+      const remove = duplicateRemoved[index] ?? [];
+      if (!remove.length) return [];
+      return [
+        {
+          group: group.files,
+          remove,
+          keep: duplicateKeep[index] ?? group.files[0],
+        },
+      ];
+    });
+    if (!selections.length) return;
+    setError(null);
+    setBusy("cleaning");
+    try {
+      setFinderCleaned(await invoke<CleanReport>("quarantine_duplicate_files", { selections }));
+      const removed = new Set(selections.flatMap((selection) => selection.remove));
+      setDuplicateGroups((groups) =>
+        groups
+          ? groups
+              .map((group) => ({
+                ...group,
+                files: group.files.filter((file) => !removed.has(file)),
+              }))
+              .filter((group) => group.files.length > 1)
+          : null,
+      );
+      setDuplicateRemoved({});
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <main className="desktop-app">
@@ -247,9 +387,7 @@ export default function App() {
           <div className="breadcrumb">
             <span>Dustonic</span>
             <ChevronRight size={13} />
-            <strong>
-              {screen === "clean" ? "Clean" : screen === "license" ? "Pro" : "Settings"}
-            </strong>
+            <strong>{screenLabel(screen)}</strong>
           </div>
           <div className="header-actions">
             <span className="protected-status">
@@ -288,6 +426,72 @@ export default function App() {
               onRestore={restore}
               onAgain={() => setCleaned(null)}
               onChangeScan={() => setReport(null)}
+              onDismissError={() => setError(null)}
+            />
+          ) : screen === "analyzer" ? (
+            <AnalyzerScreen
+              path={analyzerPath}
+              entries={analyzerEntries}
+              busy={busy}
+              error={error}
+              onPathChange={setAnalyzerPath}
+              onAnalyze={analyzeDisk}
+              onDrill={(path) => analyzeDisk(path)}
+              onDismissError={() => setError(null)}
+            />
+          ) : screen === "large" ? (
+            <LargeFilesScreen
+              path={largePath}
+              threshold={largeThreshold}
+              files={largeFiles}
+              selected={selectedLarge}
+              cleaned={finderCleaned}
+              busy={busy}
+              error={error}
+              isPro={isPro}
+              onPathChange={setLargePath}
+              onThresholdChange={setLargeThreshold}
+              onFind={findLargeFiles}
+              onToggle={(path) =>
+                setSelectedLarge((current) =>
+                  current.includes(path)
+                    ? current.filter((item) => item !== path)
+                    : [...current, path],
+                )
+              }
+              onRemove={removeLargeFiles}
+              onRestore={restore}
+              onAgain={() => setFinderCleaned(null)}
+              onUpgrade={() => setScreen("license")}
+              onDismissError={() => setError(null)}
+            />
+          ) : screen === "duplicates" ? (
+            <DuplicatesScreen
+              path={duplicatePath}
+              groups={duplicateGroups}
+              keep={duplicateKeep}
+              removed={duplicateRemoved}
+              cleaned={finderCleaned}
+              busy={busy}
+              error={error}
+              isPro={isPro}
+              onPathChange={setDuplicatePath}
+              onFind={findDuplicates}
+              onKeepChange={(index, value) =>
+                setDuplicateKeep((current) => ({ ...current, [index]: value }))
+              }
+              onToggle={(index, path) =>
+                setDuplicateRemoved((current) => ({
+                  ...current,
+                  [index]: (current[index] ?? []).includes(path)
+                    ? (current[index] ?? []).filter((item) => item !== path)
+                    : [...(current[index] ?? []), path],
+                }))
+              }
+              onRemove={removeDuplicates}
+              onRestore={restore}
+              onAgain={() => setFinderCleaned(null)}
+              onUpgrade={() => setScreen("license")}
               onDismissError={() => setError(null)}
             />
           ) : screen === "license" ? (
@@ -332,6 +536,29 @@ function AppRail({
       <div className="rail-nav">
         <RailButton active={screen === "clean"} label="Clean" onClick={() => onNavigate("clean")}>
           <LayoutDashboard size={19} />
+        </RailButton>
+        <RailButton
+          active={screen === "analyzer"}
+          label="Disk analyzer"
+          onClick={() => onNavigate("analyzer")}
+        >
+          <BarChart3 size={19} />
+        </RailButton>
+        <RailButton
+          active={screen === "large"}
+          label="Large files"
+          onClick={() => onNavigate("large")}
+        >
+          <FileSearch size={19} />
+          {!isPro && <span className="rail-badge">PRO</span>}
+        </RailButton>
+        <RailButton
+          active={screen === "duplicates"}
+          label="Duplicate finder"
+          onClick={() => onNavigate("duplicates")}
+        >
+          <Files size={19} />
+          {!isPro && <span className="rail-badge">PRO</span>}
         </RailButton>
         <RailButton
           active={screen === "license"}
@@ -896,6 +1123,476 @@ function CompletionPanel({
       <div className="completion-note">
         <ShieldCheck size={15} /> Files remain recoverable until you empty quarantine.
       </div>
+    </div>
+  );
+}
+
+function FinderHeading({
+  eyebrow,
+  title,
+  text,
+  icon,
+}: {
+  eyebrow: string;
+  title: string;
+  text: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="finder-heading">
+      <span className="finder-icon">{icon}</span>
+      <div>
+        <small className="eyebrow">{eyebrow}</small>
+        <h1>{title}</h1>
+        <p>{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function PathControl({
+  path,
+  onChange,
+  onScan,
+  busy,
+  action,
+}: {
+  path: string;
+  onChange: (value: string) => void;
+  onScan: () => void;
+  busy: boolean;
+  action: string;
+}) {
+  return (
+    <div className="finder-controls">
+      <div className="path-input">
+        <FolderOpen size={15} />
+        <input
+          value={path}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="User home directory"
+          aria-label="Folder path"
+        />
+      </div>
+      <button type="button" className="primary-button" onClick={onScan} disabled={busy}>
+        {busy ? <LoaderCircle className="spin" size={15} /> : <ScanSearch size={15} />}
+        {busy ? "Scanning…" : action}
+      </button>
+    </div>
+  );
+}
+
+function FinderError({
+  error,
+  onDismiss,
+}: {
+  error: string | null;
+  onDismiss: () => void;
+}) {
+  if (!error) return null;
+  return (
+    <div className="notice error-notice" role="alert">
+      <Info size={16} />
+      <span>{error}</span>
+      <button type="button" aria-label="Dismiss error" onClick={onDismiss}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function AnalyzerScreen({
+  path,
+  entries,
+  busy,
+  error,
+  onPathChange,
+  onAnalyze,
+  onDrill,
+  onDismissError,
+}: {
+  path: string;
+  entries: DiskEntry[] | null;
+  busy: Busy;
+  error: string | null;
+  onPathChange: (value: string) => void;
+  onAnalyze: () => void;
+  onDrill: (path: string) => void;
+  onDismissError: () => void;
+}) {
+  return (
+    <div className="finder-screen">
+      <FinderHeading
+        eyebrow="FREE TOOL"
+        title="Disk space analyzer"
+        text="See where your storage is going, one folder at a time. Dustonic only reads and measures."
+        icon={<BarChart3 size={18} />}
+      />
+      <PathControl
+        path={path}
+        onChange={onPathChange}
+        onScan={onAnalyze}
+        busy={busy === "scanning"}
+        action="Analyze folder"
+      />
+      <FinderError error={error} onDismiss={onDismissError} />
+      <div className="finder-list-panel">
+        <div className="finder-list-header">
+          <div>
+            <h2>{path || "User home directory"}</h2>
+            <p>Immediate children · sorted largest first · read-only</p>
+          </div>
+          {entries && <span className="result-count">{entries.length} items</span>}
+        </div>
+        {!entries ? (
+          <div className="list-empty">
+            <BarChart3 size={18} /> Choose a folder to see its storage breakdown.
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="list-empty">This folder is empty or cannot be read.</div>
+        ) : (
+          <div className="analysis-items">
+            {entries.map((entry) => (
+              <button
+                type="button"
+                className="analysis-row"
+                key={entry.path}
+                onClick={() => entry.is_directory && onDrill(entry.path)}
+                disabled={!entry.is_directory}
+              >
+                <span className="analysis-type">
+                  {entry.is_directory ? <FolderOpen size={15} /> : <Files size={15} />}
+                </span>
+                <span className="analysis-copy">
+                  <strong>{entry.name}</strong>
+                  <small>{entry.is_directory ? "Folder · click to drill in" : "File"}</small>
+                </span>
+                <span className="analysis-bar">
+                  <i style={{ width: `${Math.max(entry.percent, 1)}%` }} />
+                </span>
+                <span className="analysis-size">
+                  <strong>{formatBytes(entry.bytes)}</strong>
+                  <small>{entry.percent.toFixed(1)}%</small>
+                </span>
+                {entry.is_directory && <ChevronRight size={14} />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProLockedTool({
+  title,
+  text,
+  onUpgrade,
+}: {
+  title: string;
+  text: string;
+  onUpgrade: () => void;
+}) {
+  return (
+    <div className="pro-locked-panel">
+      <span className="pro-lock-icon">
+        <LockKeyhole size={19} />
+      </span>
+      <small className="eyebrow">DUSTONIC PRO</small>
+      <h2>{title}</h2>
+      <p>{text}</p>
+      <button type="button" className="primary-button" onClick={onUpgrade}>
+        Unlock Pro — one-time, lifetime <ChevronRight size={15} />
+      </button>
+    </div>
+  );
+}
+
+function LargeFilesScreen({
+  path,
+  threshold,
+  files,
+  selected,
+  cleaned,
+  busy,
+  error,
+  isPro,
+  onPathChange,
+  onThresholdChange,
+  onFind,
+  onToggle,
+  onRemove,
+  onRestore,
+  onAgain,
+  onUpgrade,
+  onDismissError,
+}: {
+  path: string;
+  threshold: number;
+  files: LargeFile[] | null;
+  selected: string[];
+  cleaned: CleanReport | null;
+  busy: Busy;
+  error: string | null;
+  isPro: boolean;
+  onPathChange: (value: string) => void;
+  onThresholdChange: (value: number) => void;
+  onFind: () => void;
+  onToggle: (path: string) => void;
+  onRemove: () => void;
+  onRestore: () => void;
+  onAgain: () => void;
+  onUpgrade: () => void;
+  onDismissError: () => void;
+}) {
+  return (
+    <div className="finder-screen">
+      <FinderHeading
+        eyebrow="PRO TOOL"
+        title="Large file finder"
+        text="Find the space-hungry files hiding in your home folder. Review every path before anything moves."
+        icon={<FileSearch size={18} />}
+      />
+      {!isPro ? (
+        <ProLockedTool
+          title="Find the files worth moving"
+          text="Large-file finder is included with Pro. Files are quarantined first, so cleanup stays undoable."
+          onUpgrade={onUpgrade}
+        />
+      ) : cleaned ? (
+        <CompletionPanel report={cleaned} busy={busy} onRestore={onRestore} onAgain={onAgain} />
+      ) : (
+        <>
+          <PathControl
+            path={path}
+            onChange={onPathChange}
+            onScan={onFind}
+            busy={busy === "scanning"}
+            action="Find large files"
+          />
+          <div className="threshold-control">
+            <label htmlFor="large-threshold">Minimum size</label>
+            <input
+              id="large-threshold"
+              type="range"
+              min="1"
+              max="1024"
+              step="1"
+              value={threshold}
+              onChange={(event) => onThresholdChange(Number(event.target.value))}
+            />
+            <strong>
+              {threshold >= 1024 ? `${(threshold / 1024).toFixed(1)} GB` : `${threshold} MB`}
+            </strong>
+          </div>
+          <FinderError error={error} onDismiss={onDismissError} />
+          <div className="finder-list-panel">
+            <div className="finder-list-header">
+              <div>
+                <h2>{files ? `${files.length} large files found` : "No scan yet"}</h2>
+                <p>Top 200 results · files move to quarantine before removal</p>
+              </div>
+              {files && <span className="result-count">{selected.length} selected</span>}
+            </div>
+            {!files ? (
+              <div className="list-empty">
+                <FileSearch size={18} /> Scan a folder to find large files.
+              </div>
+            ) : (
+              <div className="analysis-items">
+                {files.map((file) => (
+                  <label className="finder-file-row" key={file.path}>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(file.path)}
+                      onChange={() => onToggle(file.path)}
+                    />
+                    <span className="checkbox">
+                      {selected.includes(file.path) && <Check size={12} />}
+                    </span>
+                    <span className="finder-file-copy">
+                      <strong>{file.path.split(/[\\/]/).pop()}</strong>
+                      <small>{file.path}</small>
+                    </span>
+                    <span className="result-size">
+                      <strong>{formatBytes(file.bytes)}</strong>
+                      <small>
+                        {file.modified ? new Date(file.modified * 1000).toLocaleDateString() : "—"}
+                      </small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="finder-action-bar">
+            <span>
+              <strong>{selected.length}</strong> selected
+            </span>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onRemove}
+              disabled={busy !== null || selected.length === 0}
+            >
+              {busy === "cleaning" ? (
+                <LoaderCircle className="spin" size={14} />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              Move to quarantine
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DuplicatesScreen({
+  path,
+  groups,
+  keep,
+  removed,
+  cleaned,
+  busy,
+  error,
+  isPro,
+  onPathChange,
+  onFind,
+  onKeepChange,
+  onToggle,
+  onRemove,
+  onRestore,
+  onAgain,
+  onUpgrade,
+  onDismissError,
+}: {
+  path: string;
+  groups: DuplicateGroup[] | null;
+  keep: Record<number, string>;
+  removed: Record<number, string[]>;
+  cleaned: CleanReport | null;
+  busy: Busy;
+  error: string | null;
+  isPro: boolean;
+  onPathChange: (value: string) => void;
+  onFind: () => void;
+  onKeepChange: (index: number, value: string) => void;
+  onToggle: (index: number, path: string) => void;
+  onRemove: () => void;
+  onRestore: () => void;
+  onAgain: () => void;
+  onUpgrade: () => void;
+  onDismissError: () => void;
+}) {
+  const selectedCount = Object.values(removed).reduce((sum, values) => sum + values.length, 0);
+  return (
+    <div className="finder-screen">
+      <FinderHeading
+        eyebrow="PRO TOOL"
+        title="Duplicate finder"
+        text="Compare identical files by content, keep the copy you trust, and reclaim the rest safely."
+        icon={<Files size={18} />}
+      />
+      {!isPro ? (
+        <ProLockedTool
+          title="Clean up copies, not originals"
+          text="Duplicate finder is included with Pro. Dustonic always requires one copy to remain in every group."
+          onUpgrade={onUpgrade}
+        />
+      ) : cleaned ? (
+        <CompletionPanel report={cleaned} busy={busy} onRestore={onRestore} onAgain={onAgain} />
+      ) : (
+        <>
+          <PathControl
+            path={path}
+            onChange={onPathChange}
+            onScan={onFind}
+            busy={busy === "scanning"}
+            action="Find duplicates"
+          />
+          <FinderError error={error} onDismiss={onDismissError} />
+          <div className="finder-list-panel">
+            <div className="finder-list-header">
+              <div>
+                <h2>{groups ? `${groups.length} duplicate groups` : "No scan yet"}</h2>
+                <p>Identical content · one copy is always kept</p>
+              </div>
+              {groups && <span className="result-count">{selectedCount} selected</span>}
+            </div>
+            {!groups ? (
+              <div className="list-empty">
+                <Files size={18} /> Scan a folder to find identical files.
+              </div>
+            ) : groups.length === 0 ? (
+              <div className="list-empty">No duplicate files found.</div>
+            ) : (
+              <div className="duplicate-groups">
+                {groups.map((group, index) => (
+                  <div className="duplicate-group" key={`${group.files[0]}-${group.size}`}>
+                    <div className="duplicate-group-header">
+                      <strong>{formatBytes(group.size)} each</strong>
+                      <span>{group.count} identical copies</span>
+                    </div>
+                    {group.files.map((file) => {
+                      const isKeep = (keep[index] ?? group.files[0]) === file;
+                      const isRemoved = (removed[index] ?? []).includes(file);
+                      return (
+                        <label className={`finder-file-row ${isKeep ? "kept" : ""}`} key={file}>
+                          <input
+                            type="checkbox"
+                            checked={isRemoved}
+                            onChange={() => !isKeep && onToggle(index, file)}
+                            disabled={isKeep}
+                          />
+                          <span className="checkbox">{isRemoved && <Check size={12} />}</span>
+                          <span className="finder-file-copy">
+                            <strong>{file.split(/[\\/]/).pop()}</strong>
+                            <small>{file}</small>
+                          </span>
+                          {isKeep ? (
+                            <span className="tag safe">Keep</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-button keep-button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                onKeepChange(index, file);
+                              }}
+                            >
+                              Keep this
+                            </button>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="finder-action-bar">
+            <span>
+              <strong>{selectedCount}</strong> selected · one copy kept per group
+            </span>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onRemove}
+              disabled={busy !== null || selectedCount === 0}
+            >
+              {busy === "cleaning" ? (
+                <LoaderCircle className="spin" size={14} />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              Move duplicates to quarantine
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
