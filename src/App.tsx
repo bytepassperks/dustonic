@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Activity,
   ArrowLeft,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import productConfig from "../config/product.json";
 
 type Risk = "Safe" | "Caution";
 type Rule = {
@@ -55,6 +57,25 @@ type SystemStats = {
   memory_used: number;
   memory_total: number;
 };
+type Entitlements = {
+  id: string;
+  name: string;
+  safeCleaning: boolean;
+  manualClean: boolean;
+  proRules: boolean;
+  scheduledClean: boolean;
+  autoClean: boolean;
+  duplicateFinder: boolean;
+  largeFileFinder: boolean;
+};
+type LicenseStatus = {
+  activated: boolean;
+  tier: string;
+  name: string;
+  keyMasked: string | null;
+  email: string | null;
+  entitlements: Entitlements;
+};
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -70,6 +91,22 @@ const formatBytes = (bytes: number) => {
 
 const percent = (used: number, total: number) => (total ? Math.round((used / total) * 100) : 0);
 
+const displayError = (reason: unknown) => {
+  const raw = String(reason);
+  try {
+    const payload = JSON.parse(raw) as { code?: string };
+    if (payload.code === "PRO_REQUIRED") return "Dustonic Pro is required for this cleaning rule.";
+    if (payload.code === "LICENSE_INVALID") return "That license key is not valid.";
+    if (payload.code === "LICENSE_KEY_REQUIRED") return "Enter a license key to continue.";
+    if (payload.code === "LICENSE_VALIDATION_FAILED") {
+      return "License validation is unavailable right now. Please try again.";
+    }
+  } catch {
+    // Backend errors that are not structured are shown as-is for diagnostics.
+  }
+  return raw;
+};
+
 export default function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -80,19 +117,27 @@ export default function App() {
     "loading",
   );
   const [error, setError] = useState<string | null>(null);
+  const [license, setLicense] = useState<LicenseStatus | null>(null);
+  const [view, setView] = useState<"dashboard" | "license">("dashboard");
+  const [licenseKey, setLicenseKey] = useState("");
 
   useEffect(() => {
-    Promise.all([invoke<Catalog>("get_rule_catalog"), invoke<SystemStats>("get_system_stats")])
-      .then(([nextCatalog, nextStats]) => {
+    Promise.all([
+      invoke<Catalog>("get_rule_catalog"),
+      invoke<SystemStats>("get_system_stats"),
+      invoke<LicenseStatus>("get_license_status"),
+    ])
+      .then(([nextCatalog, nextStats, nextLicense]) => {
         setCatalog(nextCatalog);
         setStats(nextStats);
+        setLicense(nextLicense);
         setSelected(
           nextCatalog.categories.flatMap((category) =>
             category.rules.filter((rule) => rule.default_enabled).map((rule) => rule.id),
           ),
         );
       })
-      .catch((reason) => setError(String(reason)))
+      .catch((reason) => setError(displayError(reason)))
       .finally(() => setBusy(null));
   }, []);
 
@@ -115,7 +160,7 @@ export default function App() {
     try {
       setReport(await invoke<ScanReport>("scan_rules", { ruleIds: selected }));
     } catch (reason) {
-      setError(String(reason));
+      setError(displayError(reason));
     } finally {
       setBusy(null);
     }
@@ -130,7 +175,7 @@ export default function App() {
       setReport(null);
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
-      setError(String(reason));
+      setError(displayError(reason));
     } finally {
       setBusy(null);
     }
@@ -144,7 +189,34 @@ export default function App() {
       setCleaned(restored);
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
-      setError(String(reason));
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const activate = async () => {
+    setError(null);
+    setBusy("loading");
+    try {
+      const nextLicense = await invoke<LicenseStatus>("activate_license", { key: licenseKey });
+      setLicense(nextLicense);
+      setLicenseKey("");
+      setView("dashboard");
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deactivate = async () => {
+    setError(null);
+    setBusy("loading");
+    try {
+      setLicense(await invoke<LicenseStatus>("deactivate_license"));
+    } catch (reason) {
+      setError(displayError(reason));
     } finally {
       setBusy(null);
     }
@@ -174,6 +246,13 @@ export default function App() {
                 </span>
               </>
             )}
+            <button
+              type="button"
+              onClick={() => setView("license")}
+              className="rounded-full border border-teal/20 bg-teal/10 px-3 py-1.5 text-teal transition hover:bg-teal/20"
+            >
+              {license?.entitlements.proRules ? "Dustonic Pro" : "Go Pro"}
+            </button>
             <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-teal shadow-[0_0_10px_#12B5A5]" />
               Protected
@@ -182,7 +261,18 @@ export default function App() {
         </header>
 
         <section className="flex-1 py-12">
-          {cleaned ? (
+          {view === "license" ? (
+            <LicenseScreen
+              license={license}
+              licenseKey={licenseKey}
+              setLicenseKey={setLicenseKey}
+              busy={busy === "loading"}
+              error={error}
+              onActivate={activate}
+              onDeactivate={deactivate}
+              onClose={() => setView("dashboard")}
+            />
+          ) : cleaned ? (
             <ResultScreen report={cleaned} onRestore={restore} restoring={busy === "restoring"} />
           ) : (
             <>
@@ -263,7 +353,13 @@ export default function App() {
                   {report ? (
                     <ScanResults report={report} selected={selected} onToggle={toggleRule} />
                   ) : (
-                    <RulePicker catalog={catalog} selected={selected} onToggle={toggleRule} />
+                    <RulePicker
+                      catalog={catalog}
+                      selected={selected}
+                      onToggle={toggleRule}
+                      isPro={license?.entitlements.proRules ?? false}
+                      onUpgrade={() => setView("license")}
+                    />
                   )}
                 </div>
                 <aside className="h-fit rounded-2xl border border-white/[0.08] bg-panel/80 p-5">
@@ -314,10 +410,14 @@ function RulePicker({
   catalog,
   selected,
   onToggle,
+  isPro,
+  onUpgrade,
 }: {
   catalog: Catalog | null;
   selected: string[];
   onToggle: (id: string) => void;
+  isPro: boolean;
+  onUpgrade: () => void;
 }) {
   if (!catalog) {
     return (
@@ -340,7 +440,8 @@ function RulePicker({
                 key={rule.id}
                 rule={rule}
                 checked={selected.includes(rule.id)}
-                onToggle={() => onToggle(rule.id)}
+                disabled={rule.pro_only && !isPro}
+                onToggle={() => (rule.pro_only && !isPro ? onUpgrade() : onToggle(rule.id))}
               />
             ))}
           </div>
@@ -404,15 +505,27 @@ function ScanResults({
 function RuleRow({
   rule,
   checked,
+  disabled,
   onToggle,
 }: {
   rule: Rule;
   checked: boolean;
+  disabled: boolean;
   onToggle: () => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-4 py-4 first:pt-0 last:pb-0">
-      <input type="checkbox" checked={checked} onChange={onToggle} className="checkbox" />
+    <label
+      className={`flex items-center gap-4 py-4 first:pt-0 last:pb-0 ${
+        disabled ? "cursor-pointer opacity-60" : "cursor-pointer"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        className="checkbox"
+      />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-medium text-slate-200">{rule.name}</p>
@@ -473,6 +586,123 @@ function ResultScreen({
         {restoring ? <LoaderCircle className="animate-spin" size={17} /> : <RotateCcw size={17} />}
         {restoring ? "Restoring…" : "Undo cleanup"}
       </button>
+    </div>
+  );
+}
+
+function LicenseScreen({
+  license,
+  licenseKey,
+  setLicenseKey,
+  busy,
+  error,
+  onActivate,
+  onDeactivate,
+  onClose,
+}: {
+  license: LicenseStatus | null;
+  licenseKey: string;
+  setLicenseKey: (value: string) => void;
+  busy: boolean;
+  error: string | null;
+  onActivate: () => void;
+  onDeactivate: () => void;
+  onClose: () => void;
+}) {
+  const isPro = license?.entitlements.proRules ?? false;
+  return (
+    <div className="mx-auto max-w-3xl py-6">
+      <button type="button" onClick={onClose} className="button-secondary">
+        <ArrowLeft size={17} /> Back to dashboard
+      </button>
+      <div className="mt-8 grid gap-6 md:grid-cols-[1.1fr_0.9fr]">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-medium text-teal">
+            <ShieldCheck size={17} /> Dustonic licensing
+          </p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">
+            Keep your PC clean, on your terms.
+          </h1>
+          <p className="mt-4 leading-7 text-slate-400">
+            Pro unlocks deeper cleaning rules, scheduled protection, and the tools coming next.
+          </p>
+          <div className="mt-8 space-y-3">
+            {[
+              "Developer and deep-clean categories",
+              "Scheduled and automatic cleaning",
+              "Duplicate and large-file finders",
+            ].map((feature) => (
+              <div key={feature} className="flex items-center gap-3 text-sm text-slate-300">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal/10 text-teal">
+                  <Check size={14} />
+                </span>
+                {feature}
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void openUrl(productConfig.checkoutUrl)}
+            className="button-primary mt-9"
+          >
+            Upgrade with Dustonic Pro <ChevronRight size={17} />
+          </button>
+        </div>
+        <div className="h-fit rounded-2xl border border-white/[0.08] bg-panel/80 p-6">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Current plan</p>
+          <p className="mt-3 text-2xl font-semibold">{license?.name ?? "Free"}</p>
+          {isPro ? (
+            <>
+              <p className="mt-2 text-sm text-teal">Your Pro license is active.</p>
+              <div className="mt-6 space-y-2 rounded-xl border border-white/[0.07] bg-white/[0.03] p-4 text-sm">
+                <p className="text-slate-300">{license?.keyMasked}</p>
+                <p className="text-xs text-slate-500">{license?.email ?? "Licensed account"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={onDeactivate}
+                disabled={busy}
+                className="button-secondary mt-5 w-full"
+              >
+                {busy ? <LoaderCircle className="animate-spin" size={16} /> : null}
+                Deactivate license
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-slate-500">
+                Free includes safe core cleaning and manual cleanup.
+              </p>
+              <label
+                className="mt-7 block text-xs font-medium text-slate-400"
+                htmlFor="license-key"
+              >
+                Have a license key?
+              </label>
+              <input
+                id="license-key"
+                value={licenseKey}
+                onChange={(event) => setLicenseKey(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onActivate();
+                }}
+                placeholder="DUST-XXXXX-XXXXX"
+                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200 outline-none transition placeholder:text-slate-600 focus:border-teal/50"
+              />
+              <button
+                type="button"
+                onClick={onActivate}
+                disabled={busy || !licenseKey.trim()}
+                className="button-primary mt-3 w-full"
+              >
+                {busy ? <LoaderCircle className="animate-spin" size={16} /> : null}
+                Activate license
+              </button>
+            </>
+          )}
+          {error && <p className="mt-4 text-xs leading-5 text-red-300">{error}</p>}
+        </div>
+      </div>
     </div>
   );
 }

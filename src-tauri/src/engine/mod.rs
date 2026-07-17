@@ -12,6 +12,8 @@ use std::{
 use sysinfo::{Disks, System};
 use walkdir::WalkDir;
 
+use crate::license::{self, Entitlements};
+
 const RULES_JSON: &str = include_str!("rules.json");
 const MAX_SAMPLES: usize = 8;
 
@@ -158,7 +160,11 @@ impl Engine {
         }
     }
 
-    fn selected_rules(&self, ids: &[String]) -> Result<Vec<Rule>, String> {
+    fn selected_rules(
+        &self,
+        ids: &[String],
+        entitlements: &Entitlements,
+    ) -> Result<Vec<Rule>, String> {
         let platform = current_platform();
         let all = self.rules();
         let mut selected = Vec::new();
@@ -170,13 +176,19 @@ impl Engine {
             if !rule.platforms.iter().any(|p| p == platform) {
                 return Err(format!("Rule is not available on this platform: {id}"));
             }
+            if rule.pro_only && !entitlements.pro_rules {
+                return Err(license::error_code(
+                    "PRO_REQUIRED",
+                    Some(&format!("rule_id={}", rule.id)),
+                ));
+            }
             selected.push(rule.clone());
         }
         Ok(selected)
     }
 
-    fn scan(&self, ids: &[String]) -> Result<ScanReport, String> {
-        let selected = self.selected_rules(ids)?;
+    fn scan(&self, ids: &[String], entitlements: &Entitlements) -> Result<ScanReport, String> {
+        let selected = self.selected_rules(ids, entitlements)?;
         let rules: Result<Vec<_>, _> = selected
             .par_iter()
             .map(|rule| self.scan_rule(rule))
@@ -231,8 +243,13 @@ impl Engine {
         Ok(result)
     }
 
-    fn clean(&self, ids: &[String], permanent: bool) -> Result<CleanReport, String> {
-        let selected = self.selected_rules(ids)?;
+    fn clean(
+        &self,
+        ids: &[String],
+        permanent: bool,
+        entitlements: &Entitlements,
+    ) -> Result<CleanReport, String> {
+        let selected = self.selected_rules(ids, entitlements)?;
         self.clean_rules(&selected, permanent)
     }
 
@@ -368,12 +385,21 @@ pub fn catalog(app_data: PathBuf) -> Catalog {
     Engine::new(app_data).catalog()
 }
 
-pub fn scan(app_data: PathBuf, ids: Vec<String>) -> Result<ScanReport, String> {
-    Engine::new(app_data).scan(&ids)
+pub fn scan(
+    app_data: PathBuf,
+    ids: Vec<String>,
+    entitlements: Entitlements,
+) -> Result<ScanReport, String> {
+    Engine::new(app_data).scan(&ids, &entitlements)
 }
 
-pub fn clean(app_data: PathBuf, ids: Vec<String>, permanent: bool) -> Result<CleanReport, String> {
-    Engine::new(app_data).clean(&ids, permanent)
+pub fn clean(
+    app_data: PathBuf,
+    ids: Vec<String>,
+    permanent: bool,
+    entitlements: Entitlements,
+) -> Result<CleanReport, String> {
+    Engine::new(app_data).clean(&ids, permanent, &entitlements)
 }
 
 pub fn restore_last(app_data: PathBuf) -> Result<CleanReport, String> {
@@ -735,6 +761,19 @@ mod tests {
             Path::new("/tmp/dustonic-safe"),
             &engine.app_data
         ));
+    }
+
+    #[test]
+    fn pro_rule_is_rejected_without_pro_entitlement() {
+        let (_, engine) = fixture();
+        let error = engine
+            .selected_rules(&["linux-dev-cache".into()], &Entitlements::free())
+            .unwrap_err();
+        let payload: serde_json::Value = serde_json::from_str(&error).unwrap();
+        assert_eq!(payload["code"], "PRO_REQUIRED");
+        assert!(engine
+            .selected_rules(&["linux-dev-cache".into()], &Entitlements::pro())
+            .is_ok());
     }
 
     #[test]
