@@ -1,35 +1,58 @@
-use serde::Serialize;
 use std::fs;
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 
 mod app_dirs;
+mod engine;
 
-#[derive(Debug, Serialize)]
-struct ScanCategory {
-    name: String,
-    items: u32,
-    size: String,
+fn app_data(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .data_dir()
+        .map(|path| path.join(app_dirs::app_name()))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn scan_system() -> Vec<ScanCategory> {
-    vec![
-        ScanCategory {
-            name: "System cache".into(),
-            items: 128,
-            size: "42 MB".into(),
-        },
-        ScanCategory {
-            name: "Browser traces".into(),
-            items: 74,
-            size: "18 MB".into(),
-        },
-        ScanCategory {
-            name: "Temporary files".into(),
-            items: 51,
-            size: "9 MB".into(),
-        },
-    ]
+fn get_rule_catalog(app: AppHandle) -> Result<engine::Catalog, String> {
+    Ok(engine::catalog(app_data(&app)?))
+}
+
+#[tauri::command]
+fn scan_rules(app: AppHandle, rule_ids: Vec<String>) -> Result<engine::ScanReport, String> {
+    engine::scan(app_data(&app)?, rule_ids)
+}
+
+#[tauri::command]
+fn clean_rules(
+    app: AppHandle,
+    rule_ids: Vec<String>,
+    permanent: bool,
+) -> Result<engine::CleanReport, String> {
+    engine::clean(app_data(&app)?, rule_ids, permanent)
+}
+
+#[tauri::command]
+fn restore_last_quarantine(app: AppHandle) -> Result<engine::CleanReport, String> {
+    engine::restore_last(app_data(&app)?)
+}
+
+#[tauri::command]
+fn empty_quarantine(app: AppHandle) -> Result<(), String> {
+    engine::empty_quarantine(app_data(&app)?)
+}
+
+#[tauri::command]
+fn get_system_stats() -> engine::SystemStats {
+    engine::stats()
+}
+
+#[tauri::command]
+fn flush_dns() -> Result<(), String> {
+    engine::flush_dns()
+}
+
+#[tauri::command]
+fn empty_trash() -> Result<(), String> {
+    engine::empty_trash()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -40,7 +63,16 @@ pub fn run() {
             fs::create_dir_all(app_data_dir)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![scan_system])
+        .invoke_handler(tauri::generate_handler![
+            get_rule_catalog,
+            scan_rules,
+            clean_rules,
+            restore_last_quarantine,
+            empty_quarantine,
+            get_system_stats,
+            flush_dns,
+            empty_trash
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Dustonic");
 }

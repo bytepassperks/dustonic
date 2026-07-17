@@ -24,3 +24,22 @@ body {
 button {
   font: inherit;
 }
+
+@layer components {
+  .button-primary,
+  .button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .button-primary {
+    @apply bg-gradient-to-r from-teal to-blue text-white shadow-lg shadow-teal/10 hover:brightness-110;
+  }
+
+  .button-secondary {
+    @apply border border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08];
+  }
+
+  .checkbox {
+    @apply h-4 w-4 shrink-0 appearance-none rounded border border-white/20 bg-white/[0.04] checked:border-teal checked:bg-teal;
+  }
+}
