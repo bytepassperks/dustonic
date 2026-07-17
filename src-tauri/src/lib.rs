@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 mod app_dirs;
 mod engine;
 mod license;
+mod system_tools;
 
 fn app_data(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
@@ -75,6 +76,53 @@ fn flush_dns() -> Result<(), String> {
 #[tauri::command]
 fn empty_trash() -> Result<(), String> {
     engine::empty_trash()
+}
+
+#[tauri::command]
+fn list_startup_items(app: AppHandle) -> Result<Vec<system_tools::StartupItem>, String> {
+    system_tools::list_startup_items(app_data(&app)?)
+}
+
+#[tauri::command]
+fn set_startup_item_enabled(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<system_tools::StartupItem, String> {
+    system_tools::set_startup_item_enabled(app_data(&app)?, id, enabled)
+}
+
+#[tauri::command]
+fn list_installed_programs() -> Result<Vec<system_tools::InstalledProgram>, String> {
+    system_tools::list_installed_programs()
+}
+
+#[tauri::command]
+fn uninstall_program(id: String) -> Result<system_tools::UninstallResult, String> {
+    system_tools::uninstall_program(id)
+}
+
+#[tauri::command]
+fn scan_registry(app: AppHandle) -> Result<system_tools::RegistryScanResult, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    if !entitlements.pro_rules {
+        return Err(license::error_code("PRO_REQUIRED", None));
+    }
+    system_tools::scan_registry(data_dir)
+}
+
+#[tauri::command]
+fn clean_registry(
+    app: AppHandle,
+    finding_ids: Vec<String>,
+) -> Result<system_tools::RegistryCleanResult, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    if !entitlements.pro_rules {
+        return Err(license::error_code("PRO_REQUIRED", None));
+    }
+    system_tools::clean_registry(data_dir, finding_ids)
 }
 
 #[tauri::command]
@@ -160,7 +208,13 @@ pub fn run() {
             find_large_files,
             find_duplicates,
             quarantine_paths,
-            quarantine_duplicate_files
+            quarantine_duplicate_files,
+            list_startup_items,
+            set_startup_item_enabled,
+            list_installed_programs,
+            uninstall_program,
+            scan_registry,
+            clean_registry
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dustonic");

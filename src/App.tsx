@@ -7,6 +7,8 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  Copy,
+  ExternalLink,
   FileSearch,
   Files,
   FolderOpen,
@@ -16,13 +18,17 @@ import {
   LoaderCircle,
   LockKeyhole,
   Moon,
+  PackageOpen,
+  Power,
   RotateCcw,
   ScanSearch,
+  Search,
   Settings2,
   ShieldCheck,
   Sparkles,
   Sun,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -89,7 +95,16 @@ type LicenseStatus = {
   entitlements: Entitlements;
 };
 type Busy = "loading" | "scanning" | "cleaning" | "restoring" | null;
-type Screen = "clean" | "analyzer" | "large" | "duplicates" | "license" | "settings";
+type Screen =
+  | "clean"
+  | "analyzer"
+  | "large"
+  | "duplicates"
+  | "startup"
+  | "apps"
+  | "registry"
+  | "license"
+  | "settings";
 type DiskEntry = {
   name: string;
   path: string;
@@ -100,6 +115,46 @@ type DiskEntry = {
 type LargeFile = { path: string; bytes: number; modified: number | null };
 type DuplicateGroup = { size: number; count: number; files: string[] };
 type DuplicateRemoval = { group: string[]; remove: string[]; keep: string };
+type StartupItem = {
+  id: string;
+  display_name: string;
+  command: string;
+  enabled: boolean;
+  source: string;
+};
+type InstalledProgram = {
+  id: string;
+  name: string;
+  version: string | null;
+  publisher: string | null;
+  estimated_size: number | null;
+  location: string | null;
+  uninstall_command: string | null;
+  removal_command: string | null;
+};
+type UninstallResult = {
+  supported: boolean;
+  launched: boolean;
+  command: string | null;
+  message: string;
+};
+type RegistryFinding = {
+  id: string;
+  key_path: string;
+  value_name: string;
+  reason: string;
+};
+type RegistryScanResult = {
+  supported: boolean;
+  findings: RegistryFinding[];
+  message: string;
+};
+type RegistryCleanResult = {
+  supported: boolean;
+  cleaned: number;
+  backup_path: string | null;
+  message: string;
+};
 
 const screenLabel = (screen: Screen) =>
   ({
@@ -107,6 +162,9 @@ const screenLabel = (screen: Screen) =>
     analyzer: "Disk analyzer",
     large: "Large files",
     duplicates: "Duplicates",
+    startup: "Startup",
+    apps: "Apps",
+    registry: "Registry tools",
     license: "Pro",
     settings: "Settings",
   })[screen];
@@ -168,6 +226,12 @@ export default function App() {
   const [duplicateKeep, setDuplicateKeep] = useState<Record<number, string>>({});
   const [duplicateRemoved, setDuplicateRemoved] = useState<Record<number, string[]>>({});
   const [finderCleaned, setFinderCleaned] = useState<CleanReport | null>(null);
+  const [startupItems, setStartupItems] = useState<StartupItem[] | null>(null);
+  const [programs, setPrograms] = useState<InstalledProgram[] | null>(null);
+  const [programSearch, setProgramSearch] = useState("");
+  const [registryResult, setRegistryResult] = useState<RegistryScanResult | null>(null);
+  const [registrySelected, setRegistrySelected] = useState<string[]>([]);
+  const [registryCleaned, setRegistryCleaned] = useState<RegistryCleanResult | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -378,6 +442,88 @@ export default function App() {
       setBusy(null);
     }
   };
+  const loadStartup = async () => {
+    setError(null);
+    setBusy("loading");
+    try {
+      setStartupItems(await invoke<StartupItem[]>("list_startup_items"));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const toggleStartup = async (id: string, enabled: boolean) => {
+    setError(null);
+    try {
+      const updated = await invoke<StartupItem>("set_startup_item_enabled", { id, enabled });
+      setStartupItems(
+        (items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null,
+      );
+    } catch (reason) {
+      setError(displayError(reason));
+    }
+  };
+  const loadPrograms = async () => {
+    setError(null);
+    setBusy("loading");
+    try {
+      setPrograms(await invoke<InstalledProgram[]>("list_installed_programs"));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const uninstallProgram = async (id: string) => {
+    setError(null);
+    try {
+      const result = await invoke<UninstallResult>("uninstall_program", { id });
+      if (result.command && !result.launched) {
+        await navigator.clipboard?.writeText(result.command).catch(() => undefined);
+      }
+      setError(result.message);
+    } catch (reason) {
+      setError(displayError(reason));
+    }
+  };
+  const scanRegistry = async () => {
+    setError(null);
+    setRegistryCleaned(null);
+    setBusy("scanning");
+    try {
+      const result = await invoke<RegistryScanResult>("scan_registry");
+      setRegistryResult(result);
+      setRegistrySelected(result.findings.map((finding) => finding.id));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const cleanRegistry = async () => {
+    if (!registrySelected.length) return;
+    setError(null);
+    setBusy("cleaning");
+    try {
+      setRegistryCleaned(
+        await invoke<RegistryCleanResult>("clean_registry", { findingIds: registrySelected }),
+      );
+      setRegistryResult((result) =>
+        result
+          ? {
+              ...result,
+              findings: result.findings.filter((finding) => !registrySelected.includes(finding.id)),
+            }
+          : null,
+      );
+      setRegistrySelected([]);
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <main className="desktop-app">
@@ -494,6 +640,44 @@ export default function App() {
               onUpgrade={() => setScreen("license")}
               onDismissError={() => setError(null)}
             />
+          ) : screen === "startup" ? (
+            <StartupScreen
+              items={startupItems}
+              busy={busy}
+              error={error}
+              onLoad={loadStartup}
+              onToggle={toggleStartup}
+              onDismissError={() => setError(null)}
+            />
+          ) : screen === "apps" ? (
+            <AppsScreen
+              programs={programs}
+              search={programSearch}
+              busy={busy}
+              error={error}
+              onSearch={setProgramSearch}
+              onLoad={loadPrograms}
+              onUninstall={uninstallProgram}
+              onDismissError={() => setError(null)}
+            />
+          ) : screen === "registry" ? (
+            <RegistryScreen
+              result={registryResult}
+              cleaned={registryCleaned}
+              selected={registrySelected}
+              busy={busy}
+              error={error}
+              isPro={isPro}
+              onScan={scanRegistry}
+              onToggle={(id) =>
+                setRegistrySelected((current) =>
+                  current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+                )
+              }
+              onClean={cleanRegistry}
+              onUpgrade={() => setScreen("license")}
+              onDismissError={() => setError(null)}
+            />
           ) : screen === "license" ? (
             <LicenseScreen
               license={license}
@@ -558,6 +742,28 @@ function AppRail({
           onClick={() => onNavigate("duplicates")}
         >
           <Files size={19} />
+          {!isPro && <span className="rail-badge">PRO</span>}
+        </RailButton>
+        <RailButton
+          active={screen === "startup"}
+          label="Startup manager"
+          onClick={() => onNavigate("startup")}
+        >
+          <Power size={19} />
+        </RailButton>
+        <RailButton
+          active={screen === "apps"}
+          label="Installed apps"
+          onClick={() => onNavigate("apps")}
+        >
+          <PackageOpen size={19} />
+        </RailButton>
+        <RailButton
+          active={screen === "registry"}
+          label="Windows registry tools"
+          onClick={() => onNavigate("registry")}
+        >
+          <Wrench size={19} />
           {!isPro && <span className="rail-badge">PRO</span>}
         </RailButton>
         <RailButton
@@ -1591,6 +1797,324 @@ function DuplicatesScreen({
               Move duplicates to quarantine
             </button>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StartupScreen({
+  items,
+  busy,
+  error,
+  onLoad,
+  onToggle,
+  onDismissError,
+}: {
+  items: StartupItem[] | null;
+  busy: Busy;
+  error: string | null;
+  onLoad: () => void;
+  onToggle: (id: string, enabled: boolean) => void;
+  onDismissError: () => void;
+}) {
+  const groups = items?.reduce<Record<string, StartupItem[]>>((result, item) => {
+    if (!result[item.source]) result[item.source] = [];
+    result[item.source].push(item);
+    return result;
+  }, {});
+  return (
+    <div className="system-screen">
+      <FinderHeading
+        eyebrow="FREE TOOL"
+        title="Startup manager"
+        text="See what starts with your system. Dustonic changes reversible startup settings, never deletes entries."
+        icon={<Power size={18} />}
+      />
+      <div className="system-toolbar">
+        <span>{items ? `${items.length} startup entries` : "Review boot-time applications"}</span>
+        <button type="button" className="primary-button" onClick={onLoad} disabled={busy !== null}>
+          {busy === "loading" ? (
+            <LoaderCircle className="spin" size={15} />
+          ) : (
+            <RotateCcw size={15} />
+          )}
+          {items ? "Refresh" : "Load startup entries"}
+        </button>
+      </div>
+      <FinderError error={error} onDismiss={onDismissError} />
+      {!groups ? (
+        <div className="list-empty system-empty">
+          <Power size={18} /> Load startup entries to review them by source.
+        </div>
+      ) : Object.keys(groups).length === 0 ? (
+        <div className="list-empty system-empty">No startup entries were found.</div>
+      ) : (
+        <div className="system-groups">
+          {Object.entries(groups).map(([source, sourceItems]) => (
+            <div className="finder-list-panel" key={source}>
+              <div className="finder-list-header">
+                <div>
+                  <h2>{source}</h2>
+                  <p>Changes are reversible and apply without deleting the entry.</p>
+                </div>
+                <span className="result-count">{sourceItems.length} entries</span>
+              </div>
+              <div className="startup-items">
+                {sourceItems.map((item) => (
+                  <div className="startup-row" key={item.id}>
+                    <span className={`startup-status ${item.enabled ? "on" : ""}`} />
+                    <span className="finder-file-copy">
+                      <strong>{item.display_name}</strong>
+                      <small>{item.command || "No command recorded"}</small>
+                    </span>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={item.enabled}
+                        onChange={(event) => onToggle(item.id, event.target.checked)}
+                      />
+                      <span />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AppsScreen({
+  programs,
+  search,
+  busy,
+  error,
+  onSearch,
+  onLoad,
+  onUninstall,
+  onDismissError,
+}: {
+  programs: InstalledProgram[] | null;
+  search: string;
+  busy: Busy;
+  error: string | null;
+  onSearch: (value: string) => void;
+  onLoad: () => void;
+  onUninstall: (id: string) => void;
+  onDismissError: () => void;
+}) {
+  const filtered = programs?.filter((program) =>
+    `${program.name} ${program.publisher ?? ""}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  return (
+    <div className="system-screen">
+      <FinderHeading
+        eyebrow="FREE TOOL"
+        title="Installed apps"
+        text="Review installed programs without touching them automatically. Windows hands off to the vendor uninstaller; Linux shows the exact manual command."
+        icon={<PackageOpen size={18} />}
+      />
+      <div className="system-toolbar">
+        <div className="search-input">
+          <Search size={15} />
+          <input
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
+            placeholder="Search installed apps"
+            aria-label="Search installed apps"
+          />
+        </div>
+        <button type="button" className="primary-button" onClick={onLoad} disabled={busy !== null}>
+          {busy === "loading" ? (
+            <LoaderCircle className="spin" size={15} />
+          ) : (
+            <RotateCcw size={15} />
+          )}
+          {programs ? "Refresh" : "Load apps"}
+        </button>
+      </div>
+      <FinderError error={error} onDismiss={onDismissError} />
+      <div className="finder-list-panel">
+        <div className="finder-list-header">
+          <div>
+            <h2>{filtered ? `${filtered.length} applications` : "No scan yet"}</h2>
+            <p>Uninstall actions are explicit and never silently remove files.</p>
+          </div>
+        </div>
+        {!filtered ? (
+          <div className="list-empty">
+            <PackageOpen size={18} /> Load the installed-program inventory to begin.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="list-empty">No matching applications.</div>
+        ) : (
+          <div className="app-items">
+            {filtered.map((program) => (
+              <div className="app-row" key={program.id}>
+                <span className="analysis-type">
+                  <PackageOpen size={15} />
+                </span>
+                <span className="finder-file-copy">
+                  <strong>{program.name}</strong>
+                  <small>
+                    {[program.version, program.publisher, program.location]
+                      .filter(Boolean)
+                      .join(" · ") || "No additional metadata"}
+                  </small>
+                </span>
+                {program.estimated_size && (
+                  <span className="result-size">
+                    <strong>{formatBytes(program.estimated_size)}</strong>
+                    <small>estimated</small>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="secondary-button app-action"
+                  onClick={() => onUninstall(program.id)}
+                >
+                  {program.removal_command ? <Copy size={13} /> : <ExternalLink size={13} />}
+                  {program.removal_command ? "Copy command" : "Uninstall"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RegistryScreen({
+  result,
+  cleaned,
+  selected,
+  busy,
+  error,
+  isPro,
+  onScan,
+  onToggle,
+  onClean,
+  onUpgrade,
+  onDismissError,
+}: {
+  result: RegistryScanResult | null;
+  cleaned: RegistryCleanResult | null;
+  selected: string[];
+  busy: Busy;
+  error: string | null;
+  isPro: boolean;
+  onScan: () => void;
+  onToggle: (id: string) => void;
+  onClean: () => void;
+  onUpgrade: () => void;
+  onDismissError: () => void;
+}) {
+  return (
+    <div className="system-screen">
+      <FinderHeading
+        eyebrow="PRO · WINDOWS ONLY"
+        title="Registry tools"
+        text="A deliberately small, review-first scan for dead App Paths and uninstall references. Backup comes before every removal."
+        icon={<Wrench size={18} />}
+      />
+      {!isPro ? (
+        <ProLockedTool
+          title="A safer registry cleaner"
+          text="Registry tools are part of Dustonic Pro and are available on Windows only. Every selected key is exported before removal."
+          onUpgrade={onUpgrade}
+        />
+      ) : (
+        <>
+          <div className="system-toolbar">
+            <span>
+              {result?.supported === false
+                ? "Windows only"
+                : (result?.message ?? "Conservative scan · no broad registry sweep")}
+            </span>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={onScan}
+              disabled={busy !== null}
+            >
+              {busy === "scanning" ? (
+                <LoaderCircle className="spin" size={15} />
+              ) : (
+                <ScanSearch size={15} />
+              )}
+              Scan registry
+            </button>
+          </div>
+          <FinderError error={error} onDismiss={onDismissError} />
+          {cleaned ? (
+            <div className="registry-result">
+              <CheckCircle2 size={22} />
+              <strong>{cleaned.cleaned} entries backed up and cleaned</strong>
+              <span>{cleaned.message}</span>
+              {cleaned.backup_path && <code>{cleaned.backup_path}</code>}
+            </div>
+          ) : (
+            <div className="finder-list-panel">
+              <div className="finder-list-header">
+                <div>
+                  <h2>{result ? `${result.findings.length} findings` : "No scan yet"}</h2>
+                  <p>Only explicitly selected findings are eligible for cleanup.</p>
+                </div>
+                {result && <span className="result-count">{selected.length} selected</span>}
+              </div>
+              {!result ? (
+                <div className="list-empty">
+                  <Wrench size={18} /> Scan the supported Windows registry areas to review findings.
+                </div>
+              ) : result.findings.length === 0 ? (
+                <div className="list-empty">{result.message}</div>
+              ) : (
+                <div className="registry-items">
+                  {result.findings.map((finding) => (
+                    <label className="finder-file-row" key={finding.id}>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(finding.id)}
+                        onChange={() => onToggle(finding.id)}
+                      />
+                      <span className="checkbox">
+                        {selected.includes(finding.id) && <Check size={12} />}
+                      </span>
+                      <span className="finder-file-copy">
+                        <strong>{finding.value_name}</strong>
+                        <small>{finding.key_path}</small>
+                      </span>
+                      <span className="registry-reason">{finding.reason}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {result?.findings.length ? (
+            <div className="finder-action-bar">
+              <span>
+                <strong>{selected.length}</strong> selected · backup before cleanup
+              </span>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onClean}
+                disabled={busy !== null || !selected.length}
+              >
+                {busy === "cleaning" ? (
+                  <LoaderCircle className="spin" size={14} />
+                ) : (
+                  <Wrench size={14} />
+                )}
+                Back up and clean
+              </button>
+            </div>
+          ) : null}
         </>
       )}
     </div>
