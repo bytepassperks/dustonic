@@ -98,6 +98,7 @@ type LicenseStatus = {
 type Busy = "loading" | "scanning" | "cleaning" | "restoring" | null;
 type Screen =
   | "clean"
+  | "smart"
   | "analyzer"
   | "large"
   | "duplicates"
@@ -112,6 +113,19 @@ type DiskEntry = {
   bytes: number;
   percent: number;
   is_directory: boolean;
+  risk: Risk;
+  selectable: boolean;
+};
+type SmartCleanPlan = {
+  rules: string[];
+  bytes: number;
+  items: number;
+  remaining_free_runs: number | null;
+};
+type SmartCleanStatus = {
+  remaining_free_runs: number | null;
+  used_today: number;
+  limit: number | null;
 };
 type LargeFile = { path: string; bytes: number; modified: number | null };
 type DuplicateGroup = { size: number; count: number; files: string[] };
@@ -161,6 +175,7 @@ type RegistryCleanResult = {
 const screenLabel = (screen: Screen) =>
   ({
     clean: "Clean",
+    smart: "Smart Clean",
     analyzer: "Disk analyzer",
     large: "Large files",
     duplicates: "Duplicates",
@@ -193,6 +208,8 @@ const displayError = (reason: unknown) => {
     if (payload.code === "LICENSE_KEY_REQUIRED") return "Enter a license key to continue.";
     if (payload.code === "LICENSE_VALIDATION_FAILED")
       return "License validation is unavailable right now.";
+    if (payload.code === "SMART_CLEAN_LIMIT")
+      return "Free plan includes 2 Smart Cleans per day — upgrade to Pro for unlimited.";
   } catch {
     // Backend errors that are not structured are shown as returned.
   }
@@ -214,11 +231,14 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [report, setReport] = useState<ScanReport | null>(null);
   const [cleaned, setCleaned] = useState<CleanReport | null>(null);
+  const [smartPlan, setSmartPlan] = useState<SmartCleanPlan | null>(null);
+  const [smartStatus, setSmartStatus] = useState<SmartCleanStatus | null>(null);
   const [licenseKey, setLicenseKey] = useState("");
   const [busy, setBusy] = useState<Busy>("loading");
   const [error, setError] = useState<string | null>(null);
   const [analyzerPath, setAnalyzerPath] = useState("");
   const [analyzerEntries, setAnalyzerEntries] = useState<DiskEntry[] | null>(null);
+  const [selectedAnalyzer, setSelectedAnalyzer] = useState<string[]>([]);
   const [largePath, setLargePath] = useState("");
   const [largeThreshold, setLargeThreshold] = useState(100);
   const [largeFiles, setLargeFiles] = useState<LargeFile[] | null>(null);
@@ -364,6 +384,34 @@ export default function App() {
       setBusy(null);
     }
   };
+  const loadSmartClean = async () => {
+    setError(null);
+    try {
+      const [status, plan] = await Promise.all([
+        invoke<SmartCleanStatus>("get_smart_clean_status"),
+        invoke<SmartCleanPlan>("get_smart_clean_plan"),
+      ]);
+      setSmartStatus(status);
+      setSmartPlan(plan);
+    } catch (reason) {
+      setError(displayError(reason));
+    }
+  };
+  const runSmartClean = async () => {
+    setError(null);
+    setBusy("cleaning");
+    try {
+      const result = await invoke<CleanReport>("smart_clean");
+      setCleaned(result);
+      setSmartPlan(null);
+      setSmartStatus(await invoke<SmartCleanStatus>("get_smart_clean_status"));
+      setStats(await invoke<SystemStats>("get_system_stats"));
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
   const analyzeDisk = async (path?: string) => {
     setError(null);
     setFinderCleaned(null);
@@ -373,10 +421,33 @@ export default function App() {
       const nextPath = typeof path === "string" ? path : analyzerPath;
       setAnalyzerPath(nextPath);
       setAnalyzerEntries(await invoke<DiskEntry[]>("analyze_disk", { path: nextPath || null }));
+      setSelectedAnalyzer([]);
     } catch (reason) {
       setError(displayError(reason));
     } finally {
       setAnalyzerProgress(null);
+      setBusy(null);
+    }
+  };
+  const quarantineAnalyzer = async () => {
+    if (!selectedAnalyzer.length) return;
+    setError(null);
+    setBusy("cleaning");
+    try {
+      const confirmed = window.confirm(
+        `Move ${selectedAnalyzer.length} selected analyzer item(s) to quarantine? You can undo this from the restore action.`,
+      );
+      if (!confirmed) return;
+      setFinderCleaned(
+        await invoke<CleanReport>("quarantine_analyzer_items", { paths: selectedAnalyzer }),
+      );
+      setAnalyzerEntries(
+        (entries) => entries?.filter((entry) => !selectedAnalyzer.includes(entry.path)) ?? null,
+      );
+      setSelectedAnalyzer([]);
+    } catch (reason) {
+      setError(displayError(reason));
+    } finally {
       setBusy(null);
     }
   };
@@ -560,7 +631,14 @@ export default function App() {
 
   return (
     <main className="desktop-app">
-      <AppRail screen={screen} isPro={isPro} onNavigate={setScreen} />
+      <AppRail
+        screen={screen}
+        isPro={isPro}
+        onNavigate={(next) => {
+          setScreen(next);
+          if (next === "smart") void loadSmartClean();
+        }}
+      />
       <section className="app-pane">
         <header className="app-header">
           <div className="breadcrumb">
@@ -608,16 +686,38 @@ export default function App() {
                 onChangeScan={() => setReport(null)}
                 onDismissError={() => setError(null)}
               />
+            ) : screen === "smart" ? (
+              <SmartCleanScreen
+                plan={smartPlan}
+                status={smartStatus}
+                cleaned={cleaned}
+                busy={busy}
+                error={error}
+                onLoad={loadSmartClean}
+                onRun={runSmartClean}
+                onRestore={restore}
+                onDismissError={() => setError(null)}
+              />
             ) : screen === "analyzer" ? (
               <AnalyzerScreen
                 path={analyzerPath}
                 entries={analyzerEntries}
+                selected={selectedAnalyzer}
                 busy={busy}
                 progress={analyzerProgress}
                 error={error}
                 onPathChange={setAnalyzerPath}
                 onAnalyze={analyzeDisk}
                 onDrill={(path) => analyzeDisk(path)}
+                onToggle={(path) =>
+                  setSelectedAnalyzer((current) =>
+                    current.includes(path)
+                      ? current.filter((item) => item !== path)
+                      : [...current, path],
+                  )
+                }
+                onQuarantine={quarantineAnalyzer}
+                onRestore={restore}
                 onDismissError={() => setError(null)}
               />
             ) : screen === "large" ? (
@@ -799,6 +899,13 @@ function AppRail({
           <LayoutDashboard size={19} />
         </RailButton>
         <RailButton
+          active={screen === "smart"}
+          label="Smart Clean"
+          onClick={() => onNavigate("smart")}
+        >
+          <Sparkles size={19} />
+        </RailButton>
+        <RailButton
           active={screen === "analyzer"}
           label="Disk analyzer"
           onClick={() => onNavigate("analyzer")}
@@ -860,7 +967,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.3</span>
+        <span className="rail-version">0.2.4</span>
       </div>
     </nav>
   );
@@ -1507,22 +1614,30 @@ function FinderScanningState({
 function AnalyzerScreen({
   path,
   entries,
+  selected,
   progress,
   busy,
   error,
   onPathChange,
   onAnalyze,
   onDrill,
+  onToggle,
+  onQuarantine,
+  onRestore,
   onDismissError,
 }: {
   path: string;
   entries: DiskEntry[] | null;
+  selected: string[];
   progress: ScanProgress | null;
   busy: Busy;
   error: string | null;
   onPathChange: (value: string) => void;
   onAnalyze: () => void;
   onDrill: (path: string) => void;
+  onToggle: (path: string) => void;
+  onQuarantine: () => void;
+  onRestore: () => void;
   onDismissError: () => void;
 }) {
   return (
@@ -1545,7 +1660,7 @@ function AnalyzerScreen({
         <div className="finder-list-header">
           <div>
             <h2>{path || "User home directory"}</h2>
-            <p>Immediate children · sorted largest first · read-only</p>
+            <p>Immediate children · sorted largest first · quarantine-first cleanup</p>
           </div>
           {entries && <span className="result-count">{entries.length} items</span>}
         </div>
@@ -1563,19 +1678,24 @@ function AnalyzerScreen({
         ) : (
           <div className="analysis-items">
             {entries.map((entry) => (
-              <button
-                type="button"
-                className="analysis-row"
-                key={entry.path}
-                onClick={() => entry.is_directory && onDrill(entry.path)}
-                disabled={!entry.is_directory}
-              >
+              <div className="analysis-row" key={entry.path}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(entry.path)}
+                  disabled={!entry.selectable}
+                  onChange={() => onToggle(entry.path)}
+                  aria-label={`Select ${entry.name}`}
+                />
                 <span className="analysis-type">
                   {entry.is_directory ? <FolderOpen size={15} /> : <Files size={15} />}
                 </span>
                 <span className="analysis-copy">
                   <strong>{entry.name}</strong>
-                  <small>{entry.is_directory ? "Folder · click to drill in" : "File"}</small>
+                  <small>
+                    {entry.is_directory ? "Folder · " : "File · "}
+                    <span className={`risk-badge ${entry.risk.toLowerCase()}`}>{entry.risk}</span>
+                    {!entry.selectable && " · protected"}
+                  </small>
                 </span>
                 <span className="analysis-bar">
                   <i style={{ width: `${Math.max(entry.percent, 1)}%` }} />
@@ -1584,12 +1704,144 @@ function AnalyzerScreen({
                   <strong>{formatBytes(entry.bytes)}</strong>
                   <small>{entry.percent.toFixed(1)}%</small>
                 </span>
-                {entry.is_directory && <ChevronRight size={14} />}
-              </button>
+                {entry.is_directory && (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Open ${entry.name}`}
+                    onClick={() => onDrill(entry.path)}
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
+        {entries && entries.length > 0 && (
+          <div className="finder-action-bar">
+            <span>
+              {selected.length} selected ·{" "}
+              {formatBytes(
+                entries
+                  .filter((entry) => selected.includes(entry.path))
+                  .reduce((total, entry) => total + entry.bytes, 0),
+              )}
+            </span>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!selected.length || busy !== null}
+              onClick={onQuarantine}
+            >
+              <Trash2 size={15} /> Move to quarantine
+            </button>
+            <button type="button" className="secondary-button" onClick={onRestore}>
+              <RotateCcw size={15} /> Restore last
+            </button>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function SmartCleanScreen({
+  plan,
+  status,
+  cleaned,
+  busy,
+  error,
+  onLoad,
+  onRun,
+  onRestore,
+  onDismissError,
+}: {
+  plan: SmartCleanPlan | null;
+  status: SmartCleanStatus | null;
+  cleaned: CleanReport | null;
+  busy: Busy;
+  error: string | null;
+  onLoad: () => void;
+  onRun: () => void;
+  onRestore: () => void;
+  onDismissError: () => void;
+}) {
+  return (
+    <div className="finder-screen">
+      <FinderHeading
+        eyebrow="FREE TOOL"
+        title="Smart Clean"
+        text="A local recommendation engine that selects only safe, stale, high-value cleanup items. No cloud, chatbot, or telemetry."
+        icon={<Sparkles size={18} />}
+      />
+      <FinderError error={error} onDismiss={onDismissError} />
+      {cleaned ? (
+        <div className="completion">
+          <CheckCircle2 size={36} className="completion-icon" />
+          <small className="eyebrow">QUARANTINE COMPLETE</small>
+          <h2>{formatBytes(cleaned.bytes_freed)} moved safely</h2>
+          <p>{cleaned.items} items are ready to restore if you change your mind.</p>
+          <div className="completion-actions">
+            <button type="button" className="secondary-button" onClick={onRestore}>
+              <RotateCcw size={15} /> Restore last quarantine
+            </button>
+            <button type="button" className="primary-button" onClick={onLoad}>
+              Run another review
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="smart-panel">
+          <div className="smart-panel-copy">
+            <span className="pro-lock-icon">
+              <Sparkles size={19} />
+            </span>
+            <small className="eyebrow">RECOMMENDATION ENGINE</small>
+            <h2>One safe pass, reviewed before it runs</h2>
+            <p>
+              Smart Clean scores the existing cleaner rules by safety, reclaimable size, and
+              staleness, then quarantines the recommended safe items. Nothing is permanently
+              deleted.
+            </p>
+          </div>
+          <div className="smart-plan">
+            <div>
+              <span>Estimated reclaim</span>
+              <strong>{plan ? formatBytes(plan.bytes) : "Preparing…"}</strong>
+            </div>
+            <div>
+              <span>Recommended items</span>
+              <strong>{plan?.items ?? "—"}</strong>
+            </div>
+            <div>
+              <span>Free runs remaining</span>
+              <strong>{status?.remaining_free_runs ?? "Unlimited"}</strong>
+            </div>
+          </div>
+          <div className="finder-action-bar">
+            <span>All selected items are marked Safe · Undo remains available</span>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!plan?.items || busy !== null || status?.remaining_free_runs === 0}
+              onClick={onRun}
+            >
+              {busy === "cleaning" ? (
+                <LoaderCircle className="spin" size={15} />
+              ) : (
+                <Sparkles size={15} />
+              )}
+              {busy === "cleaning" ? "Cleaning…" : "Run Smart Clean"}
+            </button>
+          </div>
+          {status?.remaining_free_runs === 0 && (
+            <div className="notice">
+              Smart Clean is limited to 2 free runs per day. Upgrade to Pro for unlimited runs.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2397,7 +2649,7 @@ function SettingsScreen({
         <div className="about-row">
           <Info size={15} />
           <span>
-            <strong>Dustonic 0.2.3</strong>
+            <strong>Dustonic 0.2.4</strong>
             <small>Open source · Windows and Linux · No telemetry</small>
           </span>
         </div>

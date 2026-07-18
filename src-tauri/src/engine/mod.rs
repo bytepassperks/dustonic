@@ -1,5 +1,5 @@
 use chrono::Utc;
-use dirs::home_dir;
+use dirs::{cache_dir, home_dir};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,7 +7,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     process::Command,
-    time::UNIX_EPOCH,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use sysinfo::{Disks, System};
 use walkdir::WalkDir;
@@ -111,6 +111,29 @@ pub struct DiskEntry {
     pub bytes: u64,
     pub percent: f64,
     pub is_directory: bool,
+    pub risk: Risk,
+    pub selectable: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SmartCleanPlan {
+    pub rules: Vec<String>,
+    pub bytes: u64,
+    pub items: u64,
+    pub remaining_free_runs: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SmartCleanStatus {
+    pub remaining_free_runs: Option<u32>,
+    pub used_today: u32,
+    pub limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct SmartCleanCounter {
+    date: String,
+    count: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -257,6 +280,8 @@ impl Engine {
                     (bytes as f64 / total as f64) * 100.0
                 },
                 is_directory,
+                risk: item_risk(&path),
+                selectable: is_selectable_item(&path, &self.app_data),
             })
             .collect();
         result.sort_by(|left, right| {
@@ -494,6 +519,127 @@ impl Engine {
         })
     }
 
+    fn smart_clean_status(&self, pro: bool) -> Result<SmartCleanStatus, String> {
+        if pro {
+            return Ok(SmartCleanStatus {
+                remaining_free_runs: None,
+                used_today: 0,
+                limit: None,
+            });
+        }
+        let counter = self.read_smart_counter()?;
+        Ok(SmartCleanStatus {
+            remaining_free_runs: Some(2_u32.saturating_sub(counter.count)),
+            used_today: counter.count,
+            limit: Some(2),
+        })
+    }
+
+    fn smart_clean_plan(
+        &self,
+        entitlements: &Entitlements,
+    ) -> Result<(SmartCleanPlan, SmartCleanStatus), String> {
+        let mut candidates: Vec<_> = self
+            .rules()
+            .into_iter()
+            .filter(|rule| {
+                rule.platforms
+                    .iter()
+                    .any(|platform| platform == current_platform())
+                    && !rule.pro_only
+                    && rule.risk == Risk::Safe
+                    && rule.target != Target::Action
+            })
+            .filter_map(|rule| {
+                self.scan_rule(&rule)
+                    .ok()
+                    .filter(|scan| scan.bytes > 0 && scan.items > 0)
+                    .map(|scan| {
+                        let age_days = self.rule_age_days(&rule);
+                        (rule, scan, age_days)
+                    })
+            })
+            .collect();
+        candidates.retain(|(_, _, age_days)| *age_days >= 7);
+        candidates.sort_by_key(|(_, scan, age_days)| {
+            std::cmp::Reverse(smart_candidate_score(scan.bytes, &Risk::Safe, *age_days))
+        });
+        let rules: Vec<_> = candidates
+            .iter()
+            .map(|(rule, _, _)| rule.id.clone())
+            .collect();
+        let bytes = candidates.iter().map(|(_, scan, _)| scan.bytes).sum();
+        let items = candidates.iter().map(|(_, scan, _)| scan.items).sum();
+        let status = self.smart_clean_status(entitlements.pro_rules)?;
+        Ok((
+            SmartCleanPlan {
+                rules,
+                bytes,
+                items,
+                remaining_free_runs: status.remaining_free_runs,
+            },
+            status,
+        ))
+    }
+
+    fn rule_age_days(&self, rule: &Rule) -> u64 {
+        let now = SystemTime::now();
+        rule.paths
+            .iter()
+            .flat_map(|pattern| resolve_matches(pattern, &self.app_data).unwrap_or_default())
+            .flat_map(|path| entries_for_scan(&path, &rule.target).into_iter().flatten())
+            .filter_map(|(path, _)| fs::metadata(path).ok()?.modified().ok())
+            .map(|modified| {
+                now.duration_since(modified)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs()
+                    / 86_400
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn smart_clean(&self, entitlements: &Entitlements) -> Result<CleanReport, String> {
+        let (plan, status) = self.smart_clean_plan(entitlements)?;
+        if !entitlements.pro_rules && status.remaining_free_runs == Some(0) {
+            return Err(
+                r#"{"code":"SMART_CLEAN_LIMIT","message":"Free plan includes 2 Smart Cleans per day — upgrade to Pro for unlimited"}"#
+                    .into(),
+            );
+        }
+        if !entitlements.pro_rules {
+            self.write_smart_counter(status.used_today + 1)?;
+        }
+        self.clean(&plan.rules, false, entitlements)
+    }
+
+    fn read_smart_counter(&self) -> Result<SmartCleanCounter, String> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let path = self.app_data.join("smart-clean.json");
+        let counter = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<SmartCleanCounter>(&bytes).ok())
+            .filter(|counter| counter.date == today)
+            .unwrap_or(SmartCleanCounter {
+                date: today,
+                count: 0,
+            });
+        Ok(counter)
+    }
+
+    fn write_smart_counter(&self, count: u32) -> Result<(), String> {
+        fs::create_dir_all(&self.app_data).map_err(|error| error.to_string())?;
+        let counter = SmartCleanCounter {
+            date: Utc::now().format("%Y-%m-%d").to_string(),
+            count,
+        };
+        fs::write(
+            self.app_data.join("smart-clean.json"),
+            serde_json::to_vec_pretty(&counter).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())
+    }
+
     fn scan_rule(&self, rule: &Rule) -> Result<RuleScan, String> {
         let mut result = RuleScan {
             rule_id: rule.id.clone(),
@@ -691,13 +837,13 @@ impl Engine {
             quarantine_id: Some(quarantine_id.clone()),
         };
         for item in items {
-            if !is_safe_path(item, &self.app_data) || !is_regular_file(item) {
+            if !is_selectable_item(item, &self.app_data) {
                 report.skipped += 1;
                 continue;
             }
             let destination = quarantine_dir.join(format!("item-{}", entries.len()));
             let bytes = item_size(item).unwrap_or(0);
-            match fs::rename(item, &destination) {
+            match move_item(item, &destination) {
                 Ok(()) => {
                     entries.push(ManifestEntry {
                         original: item.display().to_string(),
@@ -746,7 +892,7 @@ impl Engine {
             if let Some(parent) = original.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            match fs::rename(&quarantined, &original) {
+            match move_item(&quarantined, &original) {
                 Ok(_) => {
                     report.items += 1;
                     report.bytes_freed += item_size(&original).unwrap_or(0);
@@ -756,6 +902,11 @@ impl Engine {
         }
         let _ = fs::remove_dir_all(dir);
         Ok(report)
+    }
+
+    fn quarantine_analyzer_items(&self, items: &[String]) -> Result<CleanReport, String> {
+        let paths: Vec<_> = items.iter().map(PathBuf::from).collect();
+        self.quarantine_items(&paths)
     }
 
     fn empty_quarantine(&self) -> Result<(), String> {
@@ -867,6 +1018,31 @@ pub fn quarantine_paths(
     keep_paths: Vec<String>,
 ) -> Result<CleanReport, String> {
     Engine::new(app_data).quarantine_paths(&paths, &keep_paths)
+}
+
+pub fn quarantine_analyzer_items(
+    app_data: PathBuf,
+    paths: Vec<String>,
+) -> Result<CleanReport, String> {
+    Engine::new(app_data).quarantine_analyzer_items(&paths)
+}
+
+pub fn smart_clean_plan(
+    app_data: PathBuf,
+    entitlements: Entitlements,
+) -> Result<(SmartCleanPlan, SmartCleanStatus), String> {
+    Engine::new(app_data).smart_clean_plan(&entitlements)
+}
+
+pub fn smart_clean_status(
+    app_data: PathBuf,
+    entitlements: Entitlements,
+) -> Result<SmartCleanStatus, String> {
+    Engine::new(app_data).smart_clean_status(entitlements.pro_rules)
+}
+
+pub fn smart_clean(app_data: PathBuf, entitlements: Entitlements) -> Result<CleanReport, String> {
+    Engine::new(app_data).smart_clean(&entitlements)
 }
 
 pub fn quarantine_duplicate_files(
@@ -1127,6 +1303,79 @@ fn is_regular_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn is_selectable_item(path: &Path, app_data: &Path) -> bool {
+    is_safe_path(path, app_data)
+        && fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_file() || metadata.file_type().is_dir())
+            .unwrap_or(false)
+}
+
+fn item_risk(path: &Path) -> Risk {
+    let normalized = lexical_normalize(path);
+    let temp = std::env::temp_dir();
+    let cache = cache_dir();
+    let known_safe = normalized.starts_with(lexical_normalize(&temp))
+        || cache
+            .as_ref()
+            .is_some_and(|cache| normalized.starts_with(lexical_normalize(cache)))
+        || home_dir().is_some_and(|home| {
+            let home = lexical_normalize(&home);
+            normalized.starts_with(home.join(".cache"))
+                || normalized.starts_with(home.join(".local/share/Trash"))
+        });
+    if known_safe {
+        Risk::Safe
+    } else {
+        Risk::Caution
+    }
+}
+
+fn smart_candidate_score(bytes: u64, risk: &Risk, age_days: u64) -> u128 {
+    let safety = match risk {
+        Risk::Safe => 3_u128,
+        Risk::Caution => 1_u128,
+    };
+    u128::from(bytes) * safety * (u128::from(age_days).min(365) + 1)
+}
+
+fn move_item(original: &Path, destination: &Path) -> io::Result<()> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::rename(original, destination) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            if let Err(copy_error) = copy_item(original, destination) {
+                return Err(io::Error::new(
+                    copy_error.kind(),
+                    format!("move failed: {rename_error}; copy failed: {copy_error}"),
+                ));
+            }
+            remove_item(original)
+        }
+    }
+}
+
+fn copy_item(original: &Path, destination: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(original)?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "symlinks are not eligible for quarantine",
+        ));
+    }
+    if metadata.is_dir() {
+        fs::create_dir_all(destination)?;
+        for entry in fs::read_dir(original)? {
+            let entry = entry?;
+            copy_item(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(original, destination).map(|_| ())
+    }
+}
+
 fn is_safe_path(path: &Path, app_data: &Path) -> bool {
     let normalized = lexical_normalize(path);
     let protected = if cfg!(windows) {
@@ -1337,6 +1586,71 @@ mod tests {
         assert_eq!(restored.items, 2);
         assert!(temp.path().join("cache/one.tmp").exists());
         assert!(temp.path().join("cache/nested/two.tmp").exists());
+    }
+
+    #[test]
+    fn directory_quarantine_restore_round_trip() {
+        let (temp, engine) = fixture();
+        let directory = temp.path().join("cache");
+        let report = engine
+            .quarantine_analyzer_items(&[directory.display().to_string()])
+            .unwrap();
+        assert_eq!(report.items, 1);
+        assert!(!directory.exists());
+        let restored = engine.restore_last().unwrap();
+        assert_eq!(restored.items, 1);
+        assert!(directory.join("nested/two.tmp").exists());
+    }
+
+    #[test]
+    fn analyzer_labels_cache_safe_and_personal_caution() {
+        let (_temp, engine) = fixture();
+        let cache = std::env::temp_dir().join("dustonic-cache");
+        let personal = PathBuf::from("/var/tmp/dustonic-personal/notes.txt");
+        fs::create_dir_all(&cache).unwrap();
+        fs::create_dir_all(personal.parent().unwrap()).unwrap();
+        fs::write(&personal, b"notes").unwrap();
+        assert_eq!(item_risk(&cache), Risk::Safe);
+        assert_eq!(item_risk(&personal), Risk::Caution);
+        assert!(is_selectable_item(&cache, &engine.app_data));
+        assert!(is_selectable_item(&personal, &engine.app_data));
+    }
+
+    #[test]
+    fn smart_candidate_score_prefers_safe_stale_and_large() {
+        assert!(
+            smart_candidate_score(100, &Risk::Safe, 60)
+                > smart_candidate_score(100, &Risk::Caution, 60)
+        );
+        assert!(
+            smart_candidate_score(200, &Risk::Safe, 60)
+                > smart_candidate_score(100, &Risk::Safe, 1)
+        );
+    }
+
+    #[test]
+    fn smart_counter_resets_on_day_change_and_enforces_limit() {
+        let (_temp, engine) = fixture();
+        engine.write_smart_counter(2).unwrap();
+        assert_eq!(
+            engine
+                .smart_clean_status(false)
+                .unwrap()
+                .remaining_free_runs,
+            Some(0)
+        );
+        fs::write(
+            engine.app_data.join("smart-clean.json"),
+            br#"{"date":"2000-01-01","count":2}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            engine
+                .smart_clean_status(false)
+                .unwrap()
+                .remaining_free_runs,
+            Some(2)
+        );
     }
 
     #[test]

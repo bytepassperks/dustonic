@@ -1,6 +1,6 @@
 [package]
 name = "dustonic"
-version = "0.2.3"
+version = "0.2.4"
 description = "A focused, modern PC cleaner and optimizer."
 authors = ["Dustonic"]
 edition = "2021"

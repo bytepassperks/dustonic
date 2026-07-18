@@ -181,6 +181,35 @@ fn quarantine_paths(
 }
 
 #[tauri::command(async)]
+fn quarantine_analyzer_items(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<engine::CleanReport, String> {
+    engine::quarantine_analyzer_items(app_data(&app)?, paths)
+}
+
+#[tauri::command(async)]
+fn get_smart_clean_status(app: AppHandle) -> Result<engine::SmartCleanStatus, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    engine::smart_clean_status(data_dir, entitlements)
+}
+
+#[tauri::command(async)]
+fn get_smart_clean_plan(app: AppHandle) -> Result<engine::SmartCleanPlan, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    engine::smart_clean_plan(data_dir, entitlements).map(|(plan, _)| plan)
+}
+
+#[tauri::command(async)]
+fn smart_clean(app: AppHandle) -> Result<engine::CleanReport, String> {
+    let data_dir = app_data(&app)?;
+    let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
+    engine::smart_clean(data_dir, entitlements)
+}
+
+#[tauri::command(async)]
 fn quarantine_duplicate_files(
     app: AppHandle,
     selections: Vec<engine::DuplicateRemoval>,
@@ -223,7 +252,11 @@ pub fn run() {
             find_large_files,
             find_duplicates,
             quarantine_paths,
+            quarantine_analyzer_items,
             quarantine_duplicate_files,
+            get_smart_clean_status,
+            get_smart_clean_plan,
+            smart_clean,
             list_startup_items,
             set_startup_item_enabled,
             list_installed_programs,
