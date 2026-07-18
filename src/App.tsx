@@ -2395,7 +2395,9 @@ function AppsScreen({
             <PackageOpen size={18} /> Load the installed-program inventory to begin.
           </div>
         ) : filtered.length === 0 ? (
-          <div className="list-empty">No matching applications.</div>
+          <div className="list-empty">
+            {programs?.length === 0 ? "No installed programs found." : "No matching applications."}
+          </div>
         ) : (
           <div className="app-items">
             {filtered.map((program) => (
@@ -2594,7 +2596,7 @@ function LicenseScreen({
         title="License and plan"
         text="Keep the core cleaner free. Unlock deeper rules and future tools with a lifetime Pro license."
       />
-      <div className="settings-grid">
+      <div className={`settings-grid ${isPro ? "single-card" : ""}`}>
         <section className="settings-card">
           <div className="card-heading">
             <span className={`plan-mark ${isPro ? "pro" : ""}`}>
@@ -2650,26 +2652,43 @@ function LicenseScreen({
             </p>
           )}
         </section>
-        <section className="settings-card feature-card">
-          <small className="eyebrow">LIFETIME ACCESS</small>
-          <h2>More control, less clutter.</h2>
-          <p>
-            Pro unlocks developer caches, scheduled and automatic cleaning, plus duplicate and
-            large-file finders as they arrive.
-          </p>
-          <div className="feature-checkline">
-            <CheckCircle2 size={15} /> Deep-clean rules
-          </div>
-          <div className="feature-checkline">
-            <CheckCircle2 size={15} /> Scheduled and automatic cleaning
-          </div>
-          <div className="feature-checkline">
-            <CheckCircle2 size={15} /> Future finder tools included
-          </div>
-          <button type="button" className="primary-button" onClick={onCheckout}>
-            Go Pro — one-time, lifetime <ChevronRight size={15} />
-          </button>
-        </section>
+        {!isPro ? (
+          <section className="settings-card feature-card">
+            <small className="eyebrow">LIFETIME ACCESS</small>
+            <h2>More control, less clutter.</h2>
+            <p>
+              Pro unlocks developer caches, scheduled and automatic cleaning, plus duplicate and
+              large-file finders as they arrive.
+            </p>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Deep-clean rules
+            </div>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Scheduled and automatic cleaning
+            </div>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Future finder tools included
+            </div>
+            <button type="button" className="primary-button" onClick={onCheckout}>
+              Go Pro — one-time, lifetime <ChevronRight size={15} />
+            </button>
+          </section>
+        ) : (
+          <section className="settings-card feature-card pro-confirmation">
+            <small className="eyebrow">PRO ACTIVE</small>
+            <h2>Thanks for going Pro.</h2>
+            <p>Every Dustonic feature is unlocked and ready to use.</p>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Deep-clean rules
+            </div>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Scheduled and automatic cleaning
+            </div>
+            <div className="feature-checkline">
+              <CheckCircle2 size={15} /> Finder and registry tools
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

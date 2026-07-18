@@ -603,6 +603,7 @@ mod platform {
 
     pub(super) fn list_installed_programs() -> Result<Vec<InstalledProgram>, String> {
         let mut programs = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for (root, root_name) in [(HKEY_CURRENT_USER, "HKCU"), (HKEY_LOCAL_MACHINE, "HKLM")] {
             for flags in [KEY_READ | KEY_WOW64_32KEY, KEY_READ | KEY_WOW64_64KEY] {
                 let hive = RegKey::predef(root);
@@ -620,13 +621,29 @@ mod platform {
                     let Ok(app) = key.open_subkey_with_flags(&subkey_name, flags) else {
                         continue;
                     };
-                    let Ok(name) = app.get_value::<String, _>("DisplayName") else {
+                    if app.get_value::<u32, _>("SystemComponent").unwrap_or(0) != 0 {
                         continue;
-                    };
+                    }
+                    let name = app
+                        .get_value::<String, _>("DisplayName")
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let version = app.get_value::<String, _>("DisplayVersion").ok();
+                    let key = (
+                        name.to_lowercase(),
+                        version.as_deref().unwrap_or_default().to_lowercase(),
+                    );
+                    if !seen.insert(key) {
+                        continue;
+                    }
                     programs.push(InstalledProgram {
                         id: format!("uninstall:{root_name}:{subkey_name}"),
                         name,
-                        version: app.get_value("DisplayVersion").ok(),
+                        version,
                         publisher: app.get_value("Publisher").ok(),
                         estimated_size: app
                             .get_value::<u64, _>("EstimatedSize")

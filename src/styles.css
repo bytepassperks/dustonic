@@ -242,6 +242,8 @@ label:focus-visible {
   background: var(--muted);
 }
 .app-content {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -321,9 +323,14 @@ label:focus-visible {
 }
 
 .clean-screen,
-.settings-screen {
-  width: min(100%, 1280px);
-  margin: 0 auto;
+.settings-screen,
+.finder-screen,
+.system-screen {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 .screen-titlebar,
 .screen-heading {
@@ -549,6 +556,10 @@ label:focus-visible {
 }
 
 .list-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   margin-top: 22px;
 }
 .list-toolbar {
@@ -588,6 +599,9 @@ label:focus-visible {
   color: var(--primary);
 }
 .rule-groups {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
   display: grid;
   gap: 12px;
 }
@@ -745,6 +759,14 @@ label:focus-visible {
   border-radius: 7px;
   color: var(--muted-foreground);
   font-size: 11px;
+}
+.finder-list-panel > .list-empty,
+.system-screen > .system-empty {
+  min-height: 0;
+  flex: 1;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 .result-callout {
   display: flex;
@@ -911,6 +933,10 @@ label:focus-visible {
   color: var(--muted-foreground);
 }
 .finder-list-panel {
+  display: flex;
+  min-height: 220px;
+  flex: 1;
+  flex-direction: column;
   margin-top: 22px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -945,6 +971,9 @@ label:focus-visible {
   font-size: 10px;
 }
 .analysis-items {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
   padding: 0 12px;
 }
 .analysis-row {
@@ -990,6 +1019,10 @@ label:focus-visible {
   background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 .smart-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1183,6 +1216,10 @@ label:focus-visible {
   font-size: 10px;
 }
 .smart-review {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
   margin-top: 18px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1205,7 +1242,8 @@ label:focus-visible {
   font-size: 11px;
 }
 .smart-review-list {
-  max-height: 300px;
+  min-height: 0;
+  flex: 1;
   overflow: auto;
 }
 .smart-review-group {
@@ -1338,8 +1376,7 @@ label:focus-visible {
   background: color-mix(in srgb, var(--success) 4%, var(--card));
 }
 .system-screen {
-  width: min(100%, 1280px);
-  margin: 0 auto;
+  min-height: 0;
 }
 .system-toolbar {
   display: flex;
@@ -1355,6 +1392,9 @@ label:focus-visible {
   margin-top: 22px;
 }
 .system-groups {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
   display: grid;
   gap: 13px;
   margin-top: 22px;
@@ -1362,6 +1402,9 @@ label:focus-visible {
 .startup-items,
 .app-items,
 .registry-items {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
   padding: 0 12px;
 }
 .startup-row,
@@ -1492,11 +1535,18 @@ label:focus-visible {
 }
 
 .settings-grid {
+  min-height: 0;
+  flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 15px;
 }
+.settings-grid.single-card {
+  grid-template-columns: 1fr;
+}
 .settings-card {
+  min-height: 0;
+  height: 100%;
   padding: 19px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1591,6 +1641,11 @@ label:focus-visible {
 }
 .feature-card {
   background: color-mix(in srgb, var(--primary) 4%, var(--card));
+}
+.pro-confirmation {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .feature-card h2 {
   margin: 0;
