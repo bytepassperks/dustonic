@@ -601,6 +601,14 @@ impl Engine {
 
     fn smart_clean(&self, entitlements: &Entitlements) -> Result<CleanReport, String> {
         let (plan, status) = self.smart_clean_plan(entitlements)?;
+        if plan.items == 0 || plan.bytes == 0 {
+            return Ok(CleanReport {
+                bytes_freed: 0,
+                items: 0,
+                skipped: 0,
+                quarantine_id: None,
+            });
+        }
         if !entitlements.pro_rules && status.remaining_free_runs == Some(0) {
             return Err(
                 r#"{"code":"SMART_CLEAN_LIMIT","message":"Free plan includes 2 Smart Cleans per day — upgrade to Pro for unlimited"}"#
@@ -1305,9 +1313,79 @@ fn is_regular_file(path: &Path) -> bool {
 
 fn is_selectable_item(path: &Path, app_data: &Path) -> bool {
     is_safe_path(path, app_data)
+        && !is_critical_os_descendant(path)
         && fs::symlink_metadata(path)
             .map(|metadata| metadata.file_type().is_file() || metadata.file_type().is_dir())
             .unwrap_or(false)
+}
+
+fn is_critical_os_descendant(path: &Path) -> bool {
+    if is_known_safe_location(path) {
+        return false;
+    }
+    let normalized = lexical_normalize(path);
+    let critical: Vec<PathBuf> = if cfg!(windows) {
+        vec![
+            PathBuf::from(r"C:\Windows\System32"),
+            PathBuf::from(r"C:\Windows\SysWOW64"),
+            PathBuf::from(r"C:\Windows\WinSxS"),
+            PathBuf::from(r"C:\Windows\drivers"),
+            PathBuf::from(r"C:\Program Files"),
+            PathBuf::from(r"C:\Program Files (x86)"),
+            PathBuf::from(r"C:\ProgramData"),
+        ]
+    } else {
+        vec![
+            PathBuf::from("/usr"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/sbin"),
+            PathBuf::from("/lib"),
+            PathBuf::from("/lib64"),
+            PathBuf::from("/boot"),
+            PathBuf::from("/sys"),
+            PathBuf::from("/proc"),
+            PathBuf::from("/dev"),
+            PathBuf::from("/etc"),
+            PathBuf::from("/opt"),
+            PathBuf::from("/root"),
+            PathBuf::from("/var"),
+        ]
+    };
+    critical
+        .iter()
+        .any(|root| normalized == *root || normalized.starts_with(root))
+}
+
+fn is_known_safe_location(path: &Path) -> bool {
+    let normalized = lexical_normalize(path);
+    let temp = lexical_normalize(&std::env::temp_dir());
+    if normalized == temp || normalized.starts_with(&temp) {
+        return true;
+    }
+    if cache_dir().is_some_and(|cache| {
+        let cache = lexical_normalize(&cache);
+        normalized == cache || normalized.starts_with(cache)
+    }) {
+        return true;
+    }
+    home_dir().is_some_and(|home| {
+        let home = lexical_normalize(&home);
+        let candidates = [
+            home.join(".cache"),
+            home.join(".local/share/Trash"),
+            home.join("AppData/Local/Temp"),
+            home.join("AppData/Local/Cache"),
+        ];
+        candidates
+            .iter()
+            .any(|root| normalized == *root || normalized.starts_with(root))
+    }) || (cfg!(windows)
+        && (normalized == Path::new(r"C:\Windows\Temp")
+            || normalized.starts_with(Path::new(r"C:\Windows\Temp"))
+            || normalized.components().any(|component| {
+                component.as_os_str().eq_ignore_ascii_case("cache")
+                    || component.as_os_str().eq_ignore_ascii_case("temp")
+            })))
 }
 
 fn item_risk(path: &Path) -> Risk {
@@ -1606,7 +1684,7 @@ mod tests {
     fn analyzer_labels_cache_safe_and_personal_caution() {
         let (_temp, engine) = fixture();
         let cache = std::env::temp_dir().join("dustonic-cache");
-        let personal = PathBuf::from("/var/tmp/dustonic-personal/notes.txt");
+        let personal = PathBuf::from("/home/ubuntu/dustonic-personal/notes.txt");
         fs::create_dir_all(&cache).unwrap();
         fs::create_dir_all(personal.parent().unwrap()).unwrap();
         fs::write(&personal, b"notes").unwrap();
@@ -1651,6 +1729,44 @@ mod tests {
                 .remaining_free_runs,
             Some(2)
         );
+    }
+
+    #[test]
+    fn smart_clean_noop_does_not_consume_free_run() {
+        let (_temp, engine) = fixture();
+        let before = engine.smart_clean_status(false).unwrap();
+        let report = engine.smart_clean(&Entitlements::free()).unwrap();
+        let after = engine.smart_clean_status(false).unwrap();
+        assert_eq!(report.items, 0);
+        assert_eq!(report.bytes_freed, 0);
+        assert_eq!(before.remaining_free_runs, after.remaining_free_runs);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn critical_os_descendants_are_not_selectable_but_temp_cache_are() {
+        let (temp, engine) = fixture();
+        assert!(is_critical_os_descendant(Path::new("/usr/bin")));
+        assert!(!is_selectable_item(Path::new("/usr/bin"), &engine.app_data));
+        let cache_file = temp.path().join("cache/one.tmp");
+        assert!(is_selectable_item(&cache_file, &engine.app_data));
+        assert!(engine
+            .clean_rules(
+                &[Rule {
+                    id: "fixture".into(),
+                    category: "Test".into(),
+                    name: "Fixture".into(),
+                    description: "Fixture".into(),
+                    risk: Risk::Safe,
+                    platforms: vec!["Linux".into()],
+                    paths: vec![cache_file.display().to_string()],
+                    target: Target::Files,
+                    default_enabled: true,
+                    pro_only: false,
+                }],
+                false,
+            )
+            .is_ok());
     }
 
     #[test]
