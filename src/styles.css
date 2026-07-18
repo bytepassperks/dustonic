@@ -949,6 +949,78 @@ label:focus-visible {
   text-align: left;
   background: transparent;
 }
+.analysis-row input {
+  flex: 0 0 auto;
+}
+.analysis-row .icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+.risk-badge {
+  display: inline-flex;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.risk-badge.safe {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.risk-badge.caution {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+.smart-panel {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.smart-panel-copy {
+  padding: 28px;
+}
+.smart-panel-copy h2 {
+  margin: 8px 0 0;
+  color: var(--foreground);
+  font-size: 22px;
+}
+.smart-panel-copy p {
+  max-width: 680px;
+  margin: 9px 0 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.smart-plan {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--border);
+}
+.smart-plan > div {
+  display: grid;
+  gap: 5px;
+  padding: 17px 20px;
+  background: var(--card);
+}
+.smart-plan span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.smart-plan strong {
+  color: var(--foreground);
+  font-size: 20px;
+}
 .analysis-row:last-child {
   border-bottom: 0;
 }

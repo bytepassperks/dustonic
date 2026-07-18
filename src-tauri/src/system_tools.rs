@@ -545,26 +545,29 @@ mod platform {
         let disabled_path = "Software\\Dustonic\\StartupDisabled";
         let run = root
             .open_subkey_with_flags(run_path, KEY_READ | KEY_WRITE)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| startup_registry_error(source_name, error))?;
         let disabled = RegKey::predef(HKEY_CURRENT_USER)
             .create_subkey(format!("{disabled_path}\\{source_name}"))
-            .map_err(|error| error.to_string())?
+            .map_err(|error| startup_registry_error("HKCU", error))?
             .0;
         if enabled {
             let value: String = disabled
                 .get_value(name)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| startup_registry_error("HKCU", error))?;
             run.set_value(name, &value)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| startup_registry_error(source_name, error))?;
             disabled
                 .delete_value(name)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| startup_registry_error("HKCU", error))?;
         } else {
-            let value: String = run.get_value(name).map_err(|error| error.to_string())?;
+            let value: String = run
+                .get_value(name)
+                .map_err(|error| startup_registry_error(source_name, error))?;
             disabled
                 .set_value(name, &value)
-                .map_err(|error| error.to_string())?;
-            run.delete_value(name).map_err(|error| error.to_string())?;
+                .map_err(|error| startup_registry_error("HKCU", error))?;
+            run.delete_value(name)
+                .map_err(|error| startup_registry_error(source_name, error))?;
         }
         list_startup_items(PathBuf::new())?
             .into_iter()
@@ -579,6 +582,15 @@ mod platform {
                 })
             })
             .ok_or_else(|| "Startup entry disappeared after update".into())
+    }
+
+    fn startup_registry_error(source: &str, error: std::io::Error) -> String {
+        if error.kind() == std::io::ErrorKind::PermissionDenied && source == "HKLM" {
+            "Changing system-wide (HKLM) startup entries requires running Dustonic as administrator."
+                .into()
+        } else {
+            format!("Could not update {source} startup entry: {error}")
+        }
     }
 
     pub(super) fn list_installed_programs() -> Result<Vec<InstalledProgram>, String> {
