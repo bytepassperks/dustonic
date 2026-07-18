@@ -430,6 +430,7 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::*;
+    use std::os::windows::process::CommandExt;
     use winreg::{
         enums::{
             HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
@@ -438,6 +439,12 @@ mod platform {
         types::FromRegValue,
         RegKey,
     };
+
+    fn hidden_command(program: &str) -> Command {
+        let mut command = Command::new(program);
+        command.creation_flags(0x08000000);
+        command
+    }
 
     pub(super) fn list_startup_items(_app_data: PathBuf) -> Result<Vec<StartupItem>, String> {
         let mut items = Vec::new();
@@ -657,7 +664,7 @@ mod platform {
         let command: String = key
             .get_value("UninstallString")
             .map_err(|error| error.to_string())?;
-        Command::new("cmd")
+        hidden_command("cmd")
             .args(["/C", &command])
             .spawn()
             .map_err(|error| error.to_string())?;
@@ -730,13 +737,13 @@ mod platform {
                 continue;
             }
             let export_path = backup_dir.join(format!("finding-{index}.reg"));
-            let status = Command::new("reg")
+            let status = hidden_command("reg")
                 .args(["export", id, &export_path.display().to_string(), "/y"])
                 .status();
             if !status.is_ok_and(|status| status.success()) {
                 continue;
             }
-            let _ = Command::new("reg")
+            let _ = hidden_command("reg")
                 .args(["delete", id, "/ve", "/f"])
                 .status();
             cleaned += 1;

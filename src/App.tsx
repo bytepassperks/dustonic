@@ -118,9 +118,18 @@ type DiskEntry = {
 };
 type SmartCleanPlan = {
   rules: string[];
+  groups: SmartCleanGroup[];
   bytes: number;
   items: number;
   remaining_free_runs: number | null;
+};
+type SmartCleanGroup = {
+  rule_id: string;
+  category: string;
+  name: string;
+  bytes: number;
+  items: number;
+  paths: string[];
 };
 type SmartCleanStatus = {
   remaining_free_runs: number | null;
@@ -412,6 +421,10 @@ export default function App() {
       setBusy(null);
     }
   };
+  const reviewSmartClean = async () => {
+    setCleaned(null);
+    await loadSmartClean();
+  };
   const analyzeDisk = async (path?: string) => {
     setError(null);
     setFinderCleaned(null);
@@ -642,7 +655,9 @@ export default function App() {
       <section className="app-pane">
         <header className="app-header">
           <div className="breadcrumb">
-            <span>Dustonic</span>
+            <button type="button" className="breadcrumb-home" onClick={() => setScreen("clean")}>
+              Dustonic
+            </button>
             <ChevronRight size={13} />
             <strong>{screenLabel(screen)}</strong>
           </div>
@@ -693,8 +708,8 @@ export default function App() {
                 cleaned={cleaned}
                 busy={busy}
                 error={error}
-                onLoad={loadSmartClean}
                 onRun={runSmartClean}
+                onAgain={reviewSmartClean}
                 onRestore={restore}
                 onDismissError={() => setError(null)}
               />
@@ -967,7 +982,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.6</span>
+        <span className="rail-version">0.2.7</span>
       </div>
     </nav>
   );
@@ -1752,8 +1767,8 @@ function SmartCleanScreen({
   cleaned,
   busy,
   error,
-  onLoad,
   onRun,
+  onAgain,
   onRestore,
   onDismissError,
 }: {
@@ -1762,11 +1777,12 @@ function SmartCleanScreen({
   cleaned: CleanReport | null;
   busy: Busy;
   error: string | null;
-  onLoad: () => void;
   onRun: () => void;
+  onAgain: () => void;
   onRestore: () => void;
   onDismissError: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   return (
     <div className="finder-screen">
       <FinderHeading
@@ -1786,7 +1802,14 @@ function SmartCleanScreen({
             <button type="button" className="secondary-button" onClick={onRestore}>
               <RotateCcw size={15} /> Restore last quarantine
             </button>
-            <button type="button" className="primary-button" onClick={onLoad}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setConfirming(false);
+                onAgain();
+              }}
+            >
               Run another review
             </button>
           </div>
@@ -1819,21 +1842,74 @@ function SmartCleanScreen({
               <strong>{status?.remaining_free_runs ?? "Unlimited"}</strong>
             </div>
           </div>
+          {plan && plan.groups.length > 0 && (
+            <div className="smart-review">
+              <div className="smart-review-heading">
+                <strong>Review these recommended items</strong>
+                <span>
+                  Showing sample paths from each rule; totals include every matching item.
+                </span>
+              </div>
+              <div className="smart-review-list">
+                {plan.groups.map((group) => (
+                  <details key={group.rule_id} className="smart-review-group">
+                    <summary>
+                      <span>
+                        <strong>{group.name}</strong>
+                        <small>
+                          {group.category} · {group.items} items
+                        </small>
+                      </span>
+                      <b>{formatBytes(group.bytes)}</b>
+                    </summary>
+                    <div className="smart-paths">
+                      {group.paths.map((path) => (
+                        <code key={path}>{path}</code>
+                      ))}
+                      {group.items > group.paths.length && (
+                        <small>{group.items - group.paths.length} more items included</small>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="finder-action-bar">
             <span>All selected items are marked Safe · Undo remains available</span>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={!plan?.items || busy !== null || status?.remaining_free_runs === 0}
-              onClick={onRun}
-            >
-              {busy === "cleaning" ? (
-                <LoaderCircle className="spin" size={15} />
-              ) : (
-                <Sparkles size={15} />
-              )}
-              {busy === "cleaning" ? "Cleaning…" : "Run Smart Clean"}
-            </button>
+            {!confirming ? (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={!plan?.items || busy !== null || status?.remaining_free_runs === 0}
+                onClick={() => setConfirming(true)}
+              >
+                <Sparkles size={15} /> Review complete — continue
+              </button>
+            ) : (
+              <span className="smart-confirm-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setConfirming(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busy !== null}
+                  onClick={onRun}
+                >
+                  {busy === "cleaning" ? (
+                    <LoaderCircle className="spin" size={15} />
+                  ) : (
+                    <Sparkles size={15} />
+                  )}
+                  {busy === "cleaning" ? "Cleaning…" : "Clean reviewed items"}
+                </button>
+              </span>
+            )}
           </div>
           {status?.remaining_free_runs === 0 && (
             <div className="notice">
@@ -2649,7 +2725,7 @@ function SettingsScreen({
         <div className="about-row">
           <Info size={15} />
           <span>
-            <strong>Dustonic 0.2.6</strong>
+            <strong>Dustonic 0.2.7</strong>
             <small>Open source · Windows and Linux · No telemetry</small>
           </span>
         </div>
