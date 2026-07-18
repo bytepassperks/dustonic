@@ -243,8 +243,16 @@ export default function App() {
   const [smartPlan, setSmartPlan] = useState<SmartCleanPlan | null>(null);
   const [smartStatus, setSmartStatus] = useState<SmartCleanStatus | null>(null);
   const [licenseKey, setLicenseKey] = useState("");
-  const [busy, setBusy] = useState<Busy>("loading");
-  const [error, setError] = useState<string | null>(null);
+  const [busyByScreen, setBusyByScreen] = useState<Partial<Record<Screen, Busy>>>({
+    clean: "loading",
+  });
+  const [errorByScreen, setErrorByScreen] = useState<Partial<Record<Screen, string | null>>>({});
+  const busyFor = (target: Screen) => busyByScreen[target] ?? null;
+  const setBusyFor = (target: Screen, next: Busy) =>
+    setBusyByScreen((current) => ({ ...current, [target]: next }));
+  const errorFor = (target: Screen) => errorByScreen[target] ?? null;
+  const setErrorFor = (target: Screen, next: string | null) =>
+    setErrorByScreen((current) => ({ ...current, [target]: next }));
   const [analyzerPath, setAnalyzerPath] = useState("");
   const [analyzerEntries, setAnalyzerEntries] = useState<DiskEntry[] | null>(null);
   const [selectedAnalyzer, setSelectedAnalyzer] = useState<string[]>([]);
@@ -292,8 +300,10 @@ export default function App() {
           ),
         );
       })
-      .catch((reason) => setError(displayError(reason)))
-      .finally(() => setBusy(null));
+      .catch((reason) =>
+        setErrorByScreen((current) => ({ ...current, clean: displayError(reason) })),
+      )
+      .finally(() => setBusyByScreen((current) => ({ ...current, clean: null })));
   }, []);
 
   useEffect(() => {
@@ -330,71 +340,71 @@ export default function App() {
     setSelected(allRules.filter((rule) => !rule.pro_only || isPro).map((rule) => rule.id));
   const clearAll = () => setSelected([]);
   const scan = async () => {
-    setError(null);
+    setErrorFor("clean", null);
     setCleaned(null);
-    setBusy("scanning");
+    setBusyFor("clean", "scanning");
     try {
       setReport(await invoke<ScanReport>("scan_rules", { ruleIds: selected }));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("clean", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("clean", null);
     }
   };
   const clean = async () => {
     if (!report || selected.length === 0) return;
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("clean", null);
+    setBusyFor("clean", "cleaning");
     try {
       setCleaned(await invoke<CleanReport>("clean_rules", { ruleIds: selected, permanent: false }));
       setReport(null);
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("clean", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("clean", null);
     }
   };
-  const restore = async () => {
-    setError(null);
-    setBusy("restoring");
+  const restore = async (target: Screen = "clean") => {
+    setErrorFor(target, null);
+    setBusyFor(target, "restoring");
     try {
       const restored = await invoke<CleanReport>("restore_last_quarantine");
       setCleaned(restored);
       setFinderCleaned(restored);
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor(target, displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor(target, null);
     }
   };
   const activate = async () => {
-    setError(null);
-    setBusy("loading");
+    setErrorFor("license", null);
+    setBusyFor("license", "loading");
     try {
       setLicense(await invoke<LicenseStatus>("activate_license", { key: licenseKey }));
       setLicenseKey("");
       setScreen("clean");
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("license", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("license", null);
     }
   };
   const deactivate = async () => {
-    setError(null);
-    setBusy("loading");
+    setErrorFor("license", null);
+    setBusyFor("license", "loading");
     try {
       setLicense(await invoke<LicenseStatus>("deactivate_license"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("license", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("license", null);
     }
   };
   const loadSmartClean = async () => {
-    setError(null);
+    setErrorFor("smart", null);
     try {
       const [status, plan] = await Promise.all([
         invoke<SmartCleanStatus>("get_smart_clean_status"),
@@ -403,12 +413,12 @@ export default function App() {
       setSmartStatus(status);
       setSmartPlan(plan);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("smart", displayError(reason));
     }
   };
   const runSmartClean = async () => {
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("smart", null);
+    setBusyFor("smart", "cleaning");
     try {
       const result = await invoke<CleanReport>("smart_clean");
       setCleaned(result);
@@ -416,9 +426,9 @@ export default function App() {
       setSmartStatus(await invoke<SmartCleanStatus>("get_smart_clean_status"));
       setStats(await invoke<SystemStats>("get_system_stats"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("smart", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("smart", null);
     }
   };
   const reviewSmartClean = async () => {
@@ -426,9 +436,9 @@ export default function App() {
     await loadSmartClean();
   };
   const analyzeDisk = async (path?: string) => {
-    setError(null);
+    setErrorFor("analyzer", null);
     setFinderCleaned(null);
-    setBusy("scanning");
+    setBusyFor("analyzer", "scanning");
     setAnalyzerProgress({ done: 0, total: 0, name: "" });
     try {
       const nextPath = typeof path === "string" ? path : analyzerPath;
@@ -436,16 +446,16 @@ export default function App() {
       setAnalyzerEntries(await invoke<DiskEntry[]>("analyze_disk", { path: nextPath || null }));
       setSelectedAnalyzer([]);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("analyzer", displayError(reason));
     } finally {
       setAnalyzerProgress(null);
-      setBusy(null);
+      setBusyFor("analyzer", null);
     }
   };
   const quarantineAnalyzer = async () => {
     if (!selectedAnalyzer.length) return;
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("analyzer", null);
+    setBusyFor("analyzer", "cleaning");
     try {
       const confirmed = window.confirm(
         `Move ${selectedAnalyzer.length} selected analyzer item(s) to quarantine? You can undo this from the restore action.`,
@@ -459,15 +469,15 @@ export default function App() {
       );
       setSelectedAnalyzer([]);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("analyzer", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("analyzer", null);
     }
   };
   const findLargeFiles = async () => {
-    setError(null);
+    setErrorFor("large", null);
     setFinderCleaned(null);
-    setBusy("scanning");
+    setBusyFor("large", "scanning");
     setLargeProgress({ done: 0, total: 0, name: "" });
     try {
       const files = await invoke<LargeFile[]>("find_large_files", {
@@ -477,16 +487,16 @@ export default function App() {
       setLargeFiles(files);
       setSelectedLarge([]);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("large", displayError(reason));
     } finally {
       setLargeProgress(null);
-      setBusy(null);
+      setBusyFor("large", null);
     }
   };
   const findDuplicates = async () => {
-    setError(null);
+    setErrorFor("duplicates", null);
     setFinderCleaned(null);
-    setBusy("scanning");
+    setBusyFor("duplicates", "scanning");
     setDuplicateProgress({ done: 0, total: 0, name: "" });
     try {
       const groups = await invoke<DuplicateGroup[]>("find_duplicates", {
@@ -498,16 +508,16 @@ export default function App() {
         Object.fromEntries(groups.map((group, index) => [index, group.files.slice(1)])),
       );
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("duplicates", displayError(reason));
     } finally {
       setDuplicateProgress(null);
-      setBusy(null);
+      setBusyFor("duplicates", null);
     }
   };
   const removeLargeFiles = async () => {
     if (selectedLarge.length === 0) return;
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("large", null);
+    setBusyFor("large", "cleaning");
     try {
       setFinderCleaned(
         await invoke<CleanReport>("quarantine_paths", {
@@ -518,9 +528,9 @@ export default function App() {
       setLargeFiles((files) => files?.filter((file) => !selectedLarge.includes(file.path)) ?? null);
       setSelectedLarge([]);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("large", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("large", null);
     }
   };
   const removeDuplicates = async () => {
@@ -537,8 +547,8 @@ export default function App() {
       ];
     });
     if (!selections.length) return;
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("duplicates", null);
+    setBusyFor("duplicates", "cleaning");
     try {
       setFinderCleaned(await invoke<CleanReport>("quarantine_duplicate_files", { selections }));
       const removed = new Set(selections.flatMap((selection) => selection.remove));
@@ -554,74 +564,74 @@ export default function App() {
       );
       setDuplicateRemoved({});
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("duplicates", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("duplicates", null);
     }
   };
   const loadStartup = async () => {
-    setError(null);
-    setBusy("loading");
+    setErrorFor("startup", null);
+    setBusyFor("startup", "loading");
     try {
       setStartupItems(await invoke<StartupItem[]>("list_startup_items"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("startup", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("startup", null);
     }
   };
   const toggleStartup = async (id: string, enabled: boolean) => {
-    setError(null);
+    setErrorFor("startup", null);
     try {
       const updated = await invoke<StartupItem>("set_startup_item_enabled", { id, enabled });
       setStartupItems(
         (items) => items?.map((item) => (item.id === updated.id ? updated : item)) ?? null,
       );
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("startup", displayError(reason));
     }
   };
   const loadPrograms = async () => {
-    setError(null);
-    setBusy("loading");
+    setErrorFor("apps", null);
+    setBusyFor("apps", "loading");
     try {
       setPrograms(await invoke<InstalledProgram[]>("list_installed_programs"));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("apps", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("apps", null);
     }
   };
   const uninstallProgram = async (id: string) => {
-    setError(null);
+    setErrorFor("apps", null);
     try {
       const result = await invoke<UninstallResult>("uninstall_program", { id });
       if (result.command && !result.launched) {
         await navigator.clipboard?.writeText(result.command).catch(() => undefined);
       }
-      setError(result.message);
+      setErrorFor("apps", result.message);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("apps", displayError(reason));
     }
   };
   const scanRegistry = async () => {
-    setError(null);
+    setErrorFor("registry", null);
     setRegistryCleaned(null);
-    setBusy("scanning");
+    setBusyFor("registry", "scanning");
     try {
       const result = await invoke<RegistryScanResult>("scan_registry");
       setRegistryResult(result);
       setRegistrySelected(result.findings.map((finding) => finding.id));
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("registry", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("registry", null);
     }
   };
   const cleanRegistry = async () => {
     if (!registrySelected.length) return;
-    setError(null);
-    setBusy("cleaning");
+    setErrorFor("registry", null);
+    setBusyFor("registry", "cleaning");
     try {
       setRegistryCleaned(
         await invoke<RegistryCleanResult>("clean_registry", { findingIds: registrySelected }),
@@ -636,9 +646,9 @@ export default function App() {
       );
       setRegistrySelected([]);
     } catch (reason) {
-      setError(displayError(reason));
+      setErrorFor("registry", displayError(reason));
     } finally {
-      setBusy(null);
+      setBusyFor("registry", null);
     }
   };
 
@@ -688,39 +698,39 @@ export default function App() {
                 cleaned={cleaned}
                 selected={selected}
                 isPro={isPro}
-                busy={busy}
-                error={error}
+                busy={busyFor("clean")}
+                error={errorFor("clean")}
                 onToggle={toggleRule}
                 onSelectAll={selectAll}
                 onClearAll={clearAll}
                 onUpgrade={() => setScreen("license")}
                 onScan={scan}
                 onClean={clean}
-                onRestore={restore}
+                onRestore={() => restore("clean")}
                 onAgain={() => setCleaned(null)}
                 onChangeScan={() => setReport(null)}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("clean", null)}
               />
             ) : screen === "smart" ? (
               <SmartCleanScreen
                 plan={smartPlan}
                 status={smartStatus}
                 cleaned={cleaned}
-                busy={busy}
-                error={error}
+                busy={busyFor("smart")}
+                error={errorFor("smart")}
                 onRun={runSmartClean}
                 onAgain={reviewSmartClean}
-                onRestore={restore}
-                onDismissError={() => setError(null)}
+                onRestore={() => restore("smart")}
+                onDismissError={() => setErrorFor("smart", null)}
               />
             ) : screen === "analyzer" ? (
               <AnalyzerScreen
                 path={analyzerPath}
                 entries={analyzerEntries}
                 selected={selectedAnalyzer}
-                busy={busy}
+                busy={busyFor("analyzer")}
                 progress={analyzerProgress}
-                error={error}
+                error={errorFor("analyzer")}
                 onPathChange={setAnalyzerPath}
                 onAnalyze={analyzeDisk}
                 onDrill={(path) => analyzeDisk(path)}
@@ -732,8 +742,8 @@ export default function App() {
                   )
                 }
                 onQuarantine={quarantineAnalyzer}
-                onRestore={restore}
-                onDismissError={() => setError(null)}
+                onRestore={() => restore("analyzer")}
+                onDismissError={() => setErrorFor("analyzer", null)}
               />
             ) : screen === "large" ? (
               <LargeFilesScreen
@@ -742,9 +752,9 @@ export default function App() {
                 files={largeFiles}
                 selected={selectedLarge}
                 cleaned={finderCleaned}
-                busy={busy}
+                busy={busyFor("large")}
                 progress={largeProgress}
-                error={error}
+                error={errorFor("large")}
                 isPro={isPro}
                 onPathChange={setLargePath}
                 onThresholdChange={setLargeThreshold}
@@ -757,10 +767,10 @@ export default function App() {
                   )
                 }
                 onRemove={removeLargeFiles}
-                onRestore={restore}
+                onRestore={() => restore("large")}
                 onAgain={() => setFinderCleaned(null)}
                 onUpgrade={() => setScreen("license")}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("large", null)}
               />
             ) : screen === "duplicates" ? (
               <DuplicatesScreen
@@ -769,9 +779,9 @@ export default function App() {
                 keep={duplicateKeep}
                 removed={duplicateRemoved}
                 cleaned={finderCleaned}
-                busy={busy}
+                busy={busyFor("duplicates")}
                 progress={duplicateProgress}
-                error={error}
+                error={errorFor("duplicates")}
                 isPro={isPro}
                 onPathChange={setDuplicatePath}
                 onFind={findDuplicates}
@@ -787,38 +797,38 @@ export default function App() {
                   }))
                 }
                 onRemove={removeDuplicates}
-                onRestore={restore}
+                onRestore={() => restore("duplicates")}
                 onAgain={() => setFinderCleaned(null)}
                 onUpgrade={() => setScreen("license")}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("duplicates", null)}
               />
             ) : screen === "startup" ? (
               <StartupScreen
                 items={startupItems}
-                busy={busy}
-                error={error}
+                busy={busyFor("startup")}
+                error={errorFor("startup")}
                 onLoad={loadStartup}
                 onToggle={toggleStartup}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("startup", null)}
               />
             ) : screen === "apps" ? (
               <AppsScreen
                 programs={programs}
                 search={programSearch}
-                busy={busy}
-                error={error}
+                busy={busyFor("apps")}
+                error={errorFor("apps")}
                 onSearch={setProgramSearch}
                 onLoad={loadPrograms}
                 onUninstall={uninstallProgram}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("apps", null)}
               />
             ) : screen === "registry" ? (
               <RegistryScreen
                 result={registryResult}
                 cleaned={registryCleaned}
                 selected={registrySelected}
-                busy={busy}
-                error={error}
+                busy={busyFor("registry")}
+                error={errorFor("registry")}
                 isPro={isPro}
                 onScan={scanRegistry}
                 onToggle={(id) =>
@@ -830,15 +840,15 @@ export default function App() {
                 }
                 onClean={cleanRegistry}
                 onUpgrade={() => setScreen("license")}
-                onDismissError={() => setError(null)}
+                onDismissError={() => setErrorFor("registry", null)}
               />
             ) : screen === "license" ? (
               <LicenseScreen
                 license={license}
                 licenseKey={licenseKey}
                 setLicenseKey={setLicenseKey}
-                busy={busy === "loading"}
-                error={error}
+                busy={busyFor("license") === "loading"}
+                error={errorFor("license")}
                 onActivate={activate}
                 onDeactivate={deactivate}
                 onCheckout={() => void openUrl(productConfig.checkoutUrl)}
@@ -848,6 +858,13 @@ export default function App() {
             )}
           </div>
         </AppErrorBoundary>
+        <footer className="status-bar">
+          <span>
+            <span className="status-dot" />
+            {screen === "clean" ? "Ready" : `${screenLabel(screen)} ready`}
+          </span>
+          <span>{isPro ? "Pro license active" : "Free plan"} · Quarantine protected</span>
+        </footer>
       </section>
     </main>
   );
@@ -982,7 +999,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.7</span>
+        <span className="rail-version">0.2.11</span>
       </div>
     </nav>
   );
@@ -1248,6 +1265,11 @@ function RuleList({
         onSelectAll={onSelectAll}
         onClearAll={onClearAll}
       />
+      <TableHeader className="rules-table-header">
+        <span>Rule</span>
+        <span>Scope</span>
+        <span>Risk</span>
+      </TableHeader>
       <div className="rule-groups">
         {catalog.categories.map((category) => (
           <RuleGroup
@@ -1312,6 +1334,11 @@ function ResultsList({
           </button>
         }
       />
+      <TableHeader className="rules-table-header">
+        <span>Rule</span>
+        <span>Items</span>
+        <span>Size</span>
+      </TableHeader>
       <div className="rule-groups">
         {Object.entries(groups).map(([category, rules]) => (
           <div className="rule-group" key={category}>
@@ -1547,12 +1574,14 @@ function FinderHeading({
     <div className="finder-heading">
       <span className="finder-icon">{icon}</span>
       <div>
-        <small className="eyebrow">{eyebrow}</small>
         <h1>{title}</h1>
-        <p>{text}</p>
       </div>
     </div>
   );
+}
+
+function TableHeader({ className = "", children }: { className?: string; children: ReactNode }) {
+  return <div className={`table-header ${className}`}>{children}</div>;
 }
 
 function PathControl({
@@ -1684,6 +1713,13 @@ function AnalyzerScreen({
             </span>
           )}
         </div>
+        <TableHeader className="analyzer-table-header">
+          <span />
+          <span>Name</span>
+          <span>Distribution</span>
+          <span>Size</span>
+          <span />
+        </TableHeader>
         {busy === "scanning" ? (
           <FinderScanningState
             progress={progress}
@@ -2044,6 +2080,11 @@ function LargeFilesScreen({
               </div>
               {files && <span className="result-count">{selected.length} selected</span>}
             </div>
+            <TableHeader className="file-table-header">
+              <span />
+              <span>File</span>
+              <span>Size</span>
+            </TableHeader>
             {busy === "scanning" ? (
               <FinderScanningState
                 progress={progress}
@@ -2184,6 +2225,11 @@ function DuplicatesScreen({
               </div>
               {groups && <span className="result-count">{selectedCount} selected</span>}
             </div>
+            <TableHeader className="duplicate-table-header">
+              <span>Group</span>
+              <span>Copies</span>
+              <span>Reclaimable</span>
+            </TableHeader>
             {busy === "scanning" ? (
               <FinderScanningState
                 progress={progress}
@@ -2322,6 +2368,11 @@ function StartupScreen({
                 </div>
                 <span className="result-count">{sourceItems.length} entries</span>
               </div>
+              <TableHeader className="startup-table-header">
+                <span>Status</span>
+                <span>Application / command</span>
+                <span>Enabled</span>
+              </TableHeader>
               <div className="startup-items">
                 {sourceItems.map((item) => (
                   <div className="startup-row" key={item.id}>
@@ -2412,6 +2463,12 @@ function AppsScreen({
             <p>Uninstall actions are explicit and never silently remove files.</p>
           </div>
         </div>
+        <TableHeader className="app-table-header">
+          <span />
+          <span>Application</span>
+          <span>Estimated size</span>
+          <span>Action</span>
+        </TableHeader>
         {!filtered ? (
           <div className="list-empty">
             <PackageOpen size={18} /> Load the installed-program inventory to begin.
@@ -2536,6 +2593,11 @@ function RegistryScreen({
                 </div>
                 {result && <span className="result-count">{selected.length} selected</span>}
               </div>
+              <TableHeader className="registry-table-header">
+                <span />
+                <span>Value / key path</span>
+                <span>Reason</span>
+              </TableHeader>
               {!result ? (
                 <div className="list-empty">
                   <Wrench size={18} /> Scan the supported Windows registry areas to review findings.
@@ -2778,9 +2840,7 @@ function SettingsScreen({
 function ScreenHeading({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return (
     <div className="screen-heading">
-      <small className="eyebrow">{eyebrow}</small>
       <h1>{title}</h1>
-      <p>{text}</p>
     </div>
   );
 }
