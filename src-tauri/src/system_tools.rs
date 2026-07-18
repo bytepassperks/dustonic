@@ -646,9 +646,9 @@ mod platform {
                         version,
                         publisher: app.get_value("Publisher").ok(),
                         estimated_size: app
-                            .get_value::<u64, _>("EstimatedSize")
+                            .get_value::<u32, _>("EstimatedSize")
                             .ok()
-                            .map(|kb| kb * 1024),
+                            .map(|kb| u64::from(kb) * 1024),
                         location: app.get_value("InstallLocation").ok(),
                         uninstall_command: app.get_value("UninstallString").ok(),
                         removal_command: None,
