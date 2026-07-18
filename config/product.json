@@ -1,4 +1,4 @@
 {
-  "licenseValidateUrl": "https://dustonic.com/api/license/validate",
+  "licenseValidateUrl": "https://dustonic-license.pages.dev/api/license/validate",
   "checkoutUrl": "https://dustonic.com/upgrade"
 }
