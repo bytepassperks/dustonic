@@ -430,7 +430,6 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::*;
-    use std::collections::HashMap;
     use winreg::{
         enums::{
             HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
@@ -537,7 +536,7 @@ mod platform {
         }
         let source = parts.next().ok_or("Missing startup registry source")?;
         let name = parts.next().ok_or("Missing startup value name")?;
-        let (root, source_name) = match *source {
+        let (root, source_name) = match source {
             "HKCU" => (RegKey::predef(HKEY_CURRENT_USER), "HKCU"),
             "HKLM" => (RegKey::predef(HKEY_LOCAL_MACHINE), "HKLM"),
             _ => return Err("Unknown startup registry source".into()),
