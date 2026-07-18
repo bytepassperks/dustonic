@@ -193,6 +193,17 @@ label:focus-visible {
   color: var(--foreground);
   font-weight: 650;
 }
+.breadcrumb-home {
+  padding: 0;
+  border: 0;
+  color: var(--muted-foreground);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.breadcrumb-home:hover {
+  color: var(--primary);
+}
 .header-actions {
   display: flex;
   align-items: center;
@@ -1171,6 +1182,88 @@ label:focus-visible {
   background: var(--card);
   font-size: 10px;
 }
+.smart-review {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+}
+.smart-review-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--border);
+}
+.smart-review-heading strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+.smart-review-heading span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.smart-review-list {
+  max-height: 300px;
+  overflow: auto;
+}
+.smart-review-group {
+  border-bottom: 1px solid var(--border);
+}
+.smart-review-group:last-child {
+  border-bottom: 0;
+}
+.smart-review-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 15px;
+  color: var(--foreground);
+  cursor: pointer;
+  list-style-position: inside;
+}
+.smart-review-group summary > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.smart-review-group summary strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smart-review-group summary small,
+.smart-review-group summary b {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+.smart-paths {
+  display: flex;
+  max-height: 145px;
+  flex-direction: column;
+  gap: 5px;
+  overflow: auto;
+  padding: 0 32px 13px;
+}
+.smart-paths code {
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font: 12px / 1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.smart-paths small {
+  color: var(--primary);
+  font-size: 11px;
+}
+.smart-confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .finder-action-bar strong {
   color: var(--foreground);
   font-weight: 700;
@@ -1593,23 +1686,23 @@ label:focus-visible {
 
 @media (min-width: 761px) {
   .app-content {
-    font-size: 14px;
+    font-size: 15px;
   }
 
   .app-content :where(p, label, input, button) {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .app-content :where(small) {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .app-content :where(.eyebrow) {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .app-content :where(.tag, .result-count, .rail-version, .breadcrumb, .protected-status) {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .app-content .screen-titlebar p,
@@ -1617,7 +1710,7 @@ label:focus-visible {
   .app-content .finder-heading p,
   .app-content .finder-list-header p,
   .app-content .list-toolbar p {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .app-content .rule-info strong,
@@ -1626,7 +1719,7 @@ label:focus-visible {
   .app-content .analysis-copy strong,
   .app-content .finder-file-copy strong,
   .app-content .duplicate-group-header strong {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .app-content .rule-info small,
@@ -1636,7 +1729,7 @@ label:focus-visible {
   .app-content .duplicate-group-header span,
   .app-content .list-empty,
   .app-content .notice {
-    font-size: 12px;
+    font-size: 13px;
   }
 }
 

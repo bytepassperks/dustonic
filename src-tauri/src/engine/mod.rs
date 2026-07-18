@@ -118,9 +118,20 @@ pub struct DiskEntry {
 #[derive(Clone, Debug, Serialize)]
 pub struct SmartCleanPlan {
     pub rules: Vec<String>,
+    pub groups: Vec<SmartCleanGroup>,
     pub bytes: u64,
     pub items: u64,
     pub remaining_free_runs: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SmartCleanGroup {
+    pub rule_id: String,
+    pub category: String,
+    pub name: String,
+    pub bytes: u64,
+    pub items: u64,
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -568,12 +579,24 @@ impl Engine {
             .iter()
             .map(|(rule, _, _)| rule.id.clone())
             .collect();
+        let groups = candidates
+            .iter()
+            .map(|(rule, scan, _)| SmartCleanGroup {
+                rule_id: rule.id.clone(),
+                category: rule.category.clone(),
+                name: rule.name.clone(),
+                bytes: scan.bytes,
+                items: scan.items,
+                paths: scan.samples.clone(),
+            })
+            .collect();
         let bytes = candidates.iter().map(|(_, scan, _)| scan.bytes).sum();
         let items = candidates.iter().map(|(_, scan, _)| scan.items).sum();
         let status = self.smart_clean_status(entitlements.pro_rules)?;
         Ok((
             SmartCleanPlan {
                 rules,
+                groups,
                 bytes,
                 items,
                 remaining_free_runs: status.remaining_free_runs,
