@@ -31,7 +31,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import productConfig from "../config/product.json";
 
@@ -338,13 +338,14 @@ export default function App() {
       setBusy(null);
     }
   };
-  const analyzeDisk = async (path = analyzerPath) => {
+  const analyzeDisk = async (path?: string) => {
     setError(null);
     setFinderCleaned(null);
     setBusy("scanning");
     try {
-      setAnalyzerPath(path);
-      setAnalyzerEntries(await invoke<DiskEntry[]>("analyze_disk", { path: path || null }));
+      const nextPath = typeof path === "string" ? path : analyzerPath;
+      setAnalyzerPath(nextPath);
+      setAnalyzerEntries(await invoke<DiskEntry[]>("analyze_disk", { path: nextPath || null }));
     } catch (reason) {
       setError(displayError(reason));
     } finally {
@@ -552,150 +553,191 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className="app-content">
-          {screen === "clean" ? (
-            <CleanScreen
-              catalog={catalog}
-              stats={stats}
-              report={report}
-              cleaned={cleaned}
-              selected={selected}
-              isPro={isPro}
-              busy={busy}
-              error={error}
-              onToggle={toggleRule}
-              onSelectAll={selectAll}
-              onClearAll={clearAll}
-              onUpgrade={() => setScreen("license")}
-              onScan={scan}
-              onClean={clean}
-              onRestore={restore}
-              onAgain={() => setCleaned(null)}
-              onChangeScan={() => setReport(null)}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "analyzer" ? (
-            <AnalyzerScreen
-              path={analyzerPath}
-              entries={analyzerEntries}
-              busy={busy}
-              error={error}
-              onPathChange={setAnalyzerPath}
-              onAnalyze={analyzeDisk}
-              onDrill={(path) => analyzeDisk(path)}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "large" ? (
-            <LargeFilesScreen
-              path={largePath}
-              threshold={largeThreshold}
-              files={largeFiles}
-              selected={selectedLarge}
-              cleaned={finderCleaned}
-              busy={busy}
-              error={error}
-              isPro={isPro}
-              onPathChange={setLargePath}
-              onThresholdChange={setLargeThreshold}
-              onFind={findLargeFiles}
-              onToggle={(path) =>
-                setSelectedLarge((current) =>
-                  current.includes(path)
-                    ? current.filter((item) => item !== path)
-                    : [...current, path],
-                )
-              }
-              onRemove={removeLargeFiles}
-              onRestore={restore}
-              onAgain={() => setFinderCleaned(null)}
-              onUpgrade={() => setScreen("license")}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "duplicates" ? (
-            <DuplicatesScreen
-              path={duplicatePath}
-              groups={duplicateGroups}
-              keep={duplicateKeep}
-              removed={duplicateRemoved}
-              cleaned={finderCleaned}
-              busy={busy}
-              error={error}
-              isPro={isPro}
-              onPathChange={setDuplicatePath}
-              onFind={findDuplicates}
-              onKeepChange={(index, value) =>
-                setDuplicateKeep((current) => ({ ...current, [index]: value }))
-              }
-              onToggle={(index, path) =>
-                setDuplicateRemoved((current) => ({
-                  ...current,
-                  [index]: (current[index] ?? []).includes(path)
-                    ? (current[index] ?? []).filter((item) => item !== path)
-                    : [...(current[index] ?? []), path],
-                }))
-              }
-              onRemove={removeDuplicates}
-              onRestore={restore}
-              onAgain={() => setFinderCleaned(null)}
-              onUpgrade={() => setScreen("license")}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "startup" ? (
-            <StartupScreen
-              items={startupItems}
-              busy={busy}
-              error={error}
-              onLoad={loadStartup}
-              onToggle={toggleStartup}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "apps" ? (
-            <AppsScreen
-              programs={programs}
-              search={programSearch}
-              busy={busy}
-              error={error}
-              onSearch={setProgramSearch}
-              onLoad={loadPrograms}
-              onUninstall={uninstallProgram}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "registry" ? (
-            <RegistryScreen
-              result={registryResult}
-              cleaned={registryCleaned}
-              selected={registrySelected}
-              busy={busy}
-              error={error}
-              isPro={isPro}
-              onScan={scanRegistry}
-              onToggle={(id) =>
-                setRegistrySelected((current) =>
-                  current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-                )
-              }
-              onClean={cleanRegistry}
-              onUpgrade={() => setScreen("license")}
-              onDismissError={() => setError(null)}
-            />
-          ) : screen === "license" ? (
-            <LicenseScreen
-              license={license}
-              licenseKey={licenseKey}
-              setLicenseKey={setLicenseKey}
-              busy={busy === "loading"}
-              error={error}
-              onActivate={activate}
-              onDeactivate={deactivate}
-              onCheckout={() => void openUrl(productConfig.checkoutUrl)}
-            />
-          ) : (
-            <SettingsScreen theme={theme} onThemeChange={setTheme} />
-          )}
-        </div>
+        <AppErrorBoundary>
+          <div className="app-content">
+            {screen === "clean" ? (
+              <CleanScreen
+                catalog={catalog}
+                stats={stats}
+                report={report}
+                cleaned={cleaned}
+                selected={selected}
+                isPro={isPro}
+                busy={busy}
+                error={error}
+                onToggle={toggleRule}
+                onSelectAll={selectAll}
+                onClearAll={clearAll}
+                onUpgrade={() => setScreen("license")}
+                onScan={scan}
+                onClean={clean}
+                onRestore={restore}
+                onAgain={() => setCleaned(null)}
+                onChangeScan={() => setReport(null)}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "analyzer" ? (
+              <AnalyzerScreen
+                path={analyzerPath}
+                entries={analyzerEntries}
+                busy={busy}
+                error={error}
+                onPathChange={setAnalyzerPath}
+                onAnalyze={analyzeDisk}
+                onDrill={(path) => analyzeDisk(path)}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "large" ? (
+              <LargeFilesScreen
+                path={largePath}
+                threshold={largeThreshold}
+                files={largeFiles}
+                selected={selectedLarge}
+                cleaned={finderCleaned}
+                busy={busy}
+                error={error}
+                isPro={isPro}
+                onPathChange={setLargePath}
+                onThresholdChange={setLargeThreshold}
+                onFind={findLargeFiles}
+                onToggle={(path) =>
+                  setSelectedLarge((current) =>
+                    current.includes(path)
+                      ? current.filter((item) => item !== path)
+                      : [...current, path],
+                  )
+                }
+                onRemove={removeLargeFiles}
+                onRestore={restore}
+                onAgain={() => setFinderCleaned(null)}
+                onUpgrade={() => setScreen("license")}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "duplicates" ? (
+              <DuplicatesScreen
+                path={duplicatePath}
+                groups={duplicateGroups}
+                keep={duplicateKeep}
+                removed={duplicateRemoved}
+                cleaned={finderCleaned}
+                busy={busy}
+                error={error}
+                isPro={isPro}
+                onPathChange={setDuplicatePath}
+                onFind={findDuplicates}
+                onKeepChange={(index, value) =>
+                  setDuplicateKeep((current) => ({ ...current, [index]: value }))
+                }
+                onToggle={(index, path) =>
+                  setDuplicateRemoved((current) => ({
+                    ...current,
+                    [index]: (current[index] ?? []).includes(path)
+                      ? (current[index] ?? []).filter((item) => item !== path)
+                      : [...(current[index] ?? []), path],
+                  }))
+                }
+                onRemove={removeDuplicates}
+                onRestore={restore}
+                onAgain={() => setFinderCleaned(null)}
+                onUpgrade={() => setScreen("license")}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "startup" ? (
+              <StartupScreen
+                items={startupItems}
+                busy={busy}
+                error={error}
+                onLoad={loadStartup}
+                onToggle={toggleStartup}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "apps" ? (
+              <AppsScreen
+                programs={programs}
+                search={programSearch}
+                busy={busy}
+                error={error}
+                onSearch={setProgramSearch}
+                onLoad={loadPrograms}
+                onUninstall={uninstallProgram}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "registry" ? (
+              <RegistryScreen
+                result={registryResult}
+                cleaned={registryCleaned}
+                selected={registrySelected}
+                busy={busy}
+                error={error}
+                isPro={isPro}
+                onScan={scanRegistry}
+                onToggle={(id) =>
+                  setRegistrySelected((current) =>
+                    current.includes(id)
+                      ? current.filter((value) => value !== id)
+                      : [...current, id],
+                  )
+                }
+                onClean={cleanRegistry}
+                onUpgrade={() => setScreen("license")}
+                onDismissError={() => setError(null)}
+              />
+            ) : screen === "license" ? (
+              <LicenseScreen
+                license={license}
+                licenseKey={licenseKey}
+                setLicenseKey={setLicenseKey}
+                busy={busy === "loading"}
+                error={error}
+                onActivate={activate}
+                onDeactivate={deactivate}
+                onCheckout={() => void openUrl(productConfig.checkoutUrl)}
+              />
+            ) : (
+              <SettingsScreen theme={theme} onThemeChange={setTheme} />
+            )}
+          </div>
+        </AppErrorBoundary>
       </section>
     </main>
   );
+}
+
+type AppErrorBoundaryState = { hasError: boolean };
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): AppErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Dustonic UI render error", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="app-error-state" role="alert">
+          <div className="app-error-card">
+            <span className="app-error-mark">!</span>
+            <small className="eyebrow">DUSTONIC UI</small>
+            <h1>This screen ran into a problem</h1>
+            <p>Your files are untouched. Reload the app to return to the utility workspace.</p>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => window.location.reload()}
+            >
+              Reload Dustonic
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function AppRail({
@@ -1437,7 +1479,7 @@ function AnalyzerScreen({
       <PathControl
         path={path}
         onChange={onPathChange}
-        onScan={onAnalyze}
+        onScan={() => void onAnalyze()}
         busy={busy === "scanning"}
         action="Analyze folder"
       />

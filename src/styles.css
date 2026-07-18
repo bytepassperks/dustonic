@@ -236,6 +236,48 @@ label:focus-visible {
   overflow: auto;
   padding: 28px 34px 34px;
 }
+.app-error-state {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100%;
+  padding: 28px;
+  background: var(--background);
+}
+.app-error-card {
+  display: flex;
+  width: min(100%, 420px);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgb(23 35 39 / 8%);
+}
+.app-error-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--danger);
+  font-weight: 800;
+}
+.app-error-card h1 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 19px;
+  letter-spacing: -.02em;
+}
+.app-error-card p {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
 
 .clean-screen,
 .settings-screen {
