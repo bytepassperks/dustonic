@@ -435,6 +435,7 @@ mod platform {
             HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
             KEY_WRITE,
         },
+        types::FromRegValue,
         RegKey,
     };
 
@@ -452,7 +453,7 @@ mod platform {
                 items.push(StartupItem {
                     id: format!("run:{root_name}:{}", value.0),
                     display_name: value.0,
-                    command: String::from_utf8_lossy(&value.1.bytes).into_owned(),
+                    command: String::from_reg_value(&value.1).unwrap_or_default(),
                     enabled: true,
                     source: format!("{root_name} Run"),
                 });
@@ -470,7 +471,7 @@ mod platform {
                 items.push(StartupItem {
                     id: format!("run:{source_name}:{}", value.0),
                     display_name: value.0,
-                    command: String::from_utf8_lossy(&value.1.bytes).into_owned(),
+                    command: String::from_reg_value(&value.1).unwrap_or_default(),
                     enabled: false,
                     source: format!("{source_name} Run"),
                 });
