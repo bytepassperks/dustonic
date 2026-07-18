@@ -1,35 +1,51 @@
-ALIAS BROWSER — PROPRIETARY SOFTWARE LICENSE
+DUSTONIC PROPRIETARY SOFTWARE LICENSE
 
-Copyright © 2025 ByteVault Enterprise. All rights reserved.
+Copyright © 2026 Dustonic. All rights reserved.
 
-This software and its associated source code, assets, and documentation
-(collectively, the "Software") are the proprietary and confidential property of
-ByteVault Enterprise ("Licensor"). The Software is licensed, not sold.
+This software, including its code, binaries, artwork, documentation, and
+associated materials (the “Software”), is proprietary software. The Software
+is licensed, not sold.
 
-1. OWNERSHIP. All right, title, and interest in and to the Software, including
-   all intellectual property rights, are and shall remain the exclusive property
-   of Licensor and its licensors.
+1. Grant of license
 
-2. RESTRICTIONS. Except as expressly permitted by a separate written agreement
-   signed by Licensor, you may not: (a) copy, reproduce, or distribute the
-   Software; (b) modify, adapt, translate, or create derivative works of the
-   Software; (c) reverse engineer, decompile, or disassemble the Software except
-   to the extent such restriction is prohibited by applicable law;
-   (d) sublicense, lease, rent, loan, or otherwise transfer the Software; or
-   (e) remove or alter any proprietary notices contained in the Software.
+Subject to these terms and any applicable purchase or subscription terms,
+Dustonic grants you a personal, limited, non-exclusive, non-transferable
+license to install and use the Software for your own lawful purposes.
 
-3. THIRD-PARTY COMPONENTS. The Software is built upon, and incorporates,
-   components that are licensed to Licensor under separate commercial agreements,
-   as well as third-party open-source components that remain subject to their
-   respective licenses. A listing of such open-source components and their
-   license notices is provided in THIRD-PARTY-NOTICES.md.
+2. Restrictions
 
-4. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+You may not copy, publish, distribute, sublicense, sell, rent, lease, share,
+modify, create derivative works from, reverse engineer, decompile, disassemble,
+or otherwise attempt to discover the source code of the Software, except to the
+extent that applicable law expressly permits such activity. You may not remove
+proprietary notices or use the Software to provide an unauthorized service to
+third parties.
 
-5. LIMITATION OF LIABILITY. IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY CLAIM,
-   DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH THE SOFTWARE OR
-   THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+3. Pro licensing
 
-For licensing inquiries, contact: contact@aliasbrowser.com
+Pro features require a valid Dustonic Pro license. Pro licenses are personal,
+non-transferable, and subject to the terms presented at purchase. A license may
+be suspended or revoked for fraud, chargebacks, abuse, or material breach of
+these terms, subject to applicable law.
+
+4. Updates and termination
+
+Dustonic may provide updates, improvements, or changes at its discretion. This
+license terminates automatically if you materially breach these terms. On
+termination, stop using and remove the Software.
+
+5. Disclaimer and limitation of liability
+
+THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE”, WITHOUT WARRANTIES OF ANY
+KIND, EXPRESS OR IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, DUSTONIC
+SHALL NOT BE LIABLE FOR INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
+PUNITIVE DAMAGES, OR FOR LOSS OF DATA, PROFITS, OR BUSINESS.
+
+6. Governing law
+
+These terms are governed by the laws of [OWNER JURISDICTION], without regard
+to conflict-of-law rules. Courts located in [OWNER VENUE] shall have
+jurisdiction, subject to applicable law.
+
+This license is a general commercial template. The owner should have counsel
+review and adapt it before relying on it for distribution or sales.
