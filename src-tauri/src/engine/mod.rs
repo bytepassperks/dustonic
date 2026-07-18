@@ -114,6 +114,13 @@ pub struct DiskEntry {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct ScanProgress {
+    pub done: usize,
+    pub total: usize,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct LargeFile {
     pub path: String,
     pub bytes: u64,
@@ -190,31 +197,50 @@ impl Engine {
         }
     }
 
+    #[allow(dead_code)]
     fn analyze_disk(&self, root: Option<&str>) -> Result<Vec<DiskEntry>, String> {
+        self.analyze_disk_with_progress(root, |_| {})
+    }
+
+    fn analyze_disk_with_progress<F>(
+        &self,
+        root: Option<&str>,
+        on_progress: F,
+    ) -> Result<Vec<DiskEntry>, String>
+    where
+        F: Fn(ScanProgress) + Send + Sync,
+    {
         let root = analysis_root(root)?;
         if !root.is_dir() {
             return Err("Disk analyzer target must be a directory".into());
         }
-        let children = fs::read_dir(&root).map_err(|error| error.to_string())?;
-        let mut entries = Vec::new();
-        for child in children.flatten() {
-            let path = child.path();
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            if metadata.file_type().is_symlink() {
-                continue;
-            }
-            let bytes = if metadata.is_dir() {
-                item_size(&path).unwrap_or(0)
-            } else if metadata.is_file() {
-                metadata.len()
-            } else {
-                continue;
-            };
-            entries.push((path, bytes, metadata.is_dir()));
-        }
+        let children = immediate_children(&root)?;
+        let total_children = children.len();
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let entries: Vec<_> = children
+            .par_iter()
+            .filter_map(|path| {
+                let metadata = fs::symlink_metadata(path).ok()?;
+                let is_directory = metadata.is_dir();
+                let bytes = if is_directory {
+                    item_size(path).unwrap_or(0)
+                } else if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    return None;
+                };
+                let current = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                on_progress(ScanProgress {
+                    done: current,
+                    total: total_children,
+                    name: path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string()),
+                });
+                Some((path.clone(), bytes, is_directory))
+            })
+            .collect();
         let total: u64 = entries.iter().map(|(_, bytes, _)| *bytes).sum();
         let mut result: Vec<_> = entries
             .into_iter()
@@ -242,43 +268,76 @@ impl Engine {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     fn find_large_files(
         &self,
         root: Option<&str>,
         min_bytes: u64,
         entitlements: &Entitlements,
     ) -> Result<Vec<LargeFile>, String> {
+        self.find_large_files_with_progress(root, min_bytes, entitlements, |_| {})
+    }
+
+    fn find_large_files_with_progress<F>(
+        &self,
+        root: Option<&str>,
+        min_bytes: u64,
+        entitlements: &Entitlements,
+        on_progress: F,
+    ) -> Result<Vec<LargeFile>, String>
+    where
+        F: Fn(ScanProgress) + Send + Sync,
+    {
         require_entitlement(entitlements.large_file_finder)?;
         let root = analysis_root(root)?;
         if !root.is_dir() {
             return Err("Large-file finder target must be a directory".into());
         }
-        let mut files = Vec::new();
-        for entry in WalkDir::new(&root)
-            .follow_links(false)
-            .into_iter()
+        let children = immediate_children(&root)?;
+        let total_children = children.len();
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let mut files: Vec<LargeFile> = children
+            .par_iter()
+            .map(|child| {
+                let mut found = Vec::new();
+                for entry in WalkDir::new(child)
+                    .follow_links(false)
+                    .into_iter()
+                    .flatten()
+                {
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+                    let metadata = match fs::symlink_metadata(entry.path()) {
+                        Ok(metadata) => metadata,
+                        Err(_) => continue,
+                    };
+                    if metadata.len() < min_bytes {
+                        continue;
+                    }
+                    found.push(LargeFile {
+                        path: entry.path().display().to_string(),
+                        bytes: metadata.len(),
+                        modified: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                            .map(|duration| duration.as_secs()),
+                    });
+                }
+                let current = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                on_progress(ScanProgress {
+                    done: current,
+                    total: total_children,
+                    name: child
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| child.display().to_string()),
+                });
+                found
+            })
             .flatten()
-        {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let metadata = match fs::symlink_metadata(entry.path()) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            if metadata.len() < min_bytes {
-                continue;
-            }
-            files.push(LargeFile {
-                path: entry.path().display().to_string(),
-                bytes: metadata.len(),
-                modified: metadata
-                    .modified()
-                    .ok()
-                    .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                    .map(|duration| duration.as_secs()),
-            });
-        }
+            .collect();
         files.sort_by(|left, right| {
             right
                 .bytes
@@ -289,33 +348,66 @@ impl Engine {
         Ok(files)
     }
 
+    #[allow(dead_code)]
     fn find_duplicates(
         &self,
         root: Option<&str>,
         entitlements: &Entitlements,
     ) -> Result<Vec<DuplicateGroup>, String> {
+        self.find_duplicates_with_progress(root, entitlements, |_| {})
+    }
+
+    fn find_duplicates_with_progress<F>(
+        &self,
+        root: Option<&str>,
+        entitlements: &Entitlements,
+        on_progress: F,
+    ) -> Result<Vec<DuplicateGroup>, String>
+    where
+        F: Fn(ScanProgress) + Send + Sync,
+    {
         require_entitlement(entitlements.duplicate_finder)?;
         let root = analysis_root(root)?;
         if !root.is_dir() {
             return Err("Duplicate finder target must be a directory".into());
         }
-        let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-        for entry in WalkDir::new(&root)
-            .follow_links(false)
-            .into_iter()
+        let children = immediate_children(&root)?;
+        let total_children = children.len();
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let files: Vec<(u64, PathBuf)> = children
+            .par_iter()
+            .map(|child| {
+                let mut found = Vec::new();
+                for entry in WalkDir::new(child)
+                    .follow_links(false)
+                    .into_iter()
+                    .flatten()
+                {
+                    if !entry.file_type().is_file() {
+                        continue;
+                    }
+                    let metadata = match fs::symlink_metadata(entry.path()) {
+                        Ok(metadata) => metadata,
+                        Err(_) => continue,
+                    };
+                    found.push((metadata.len(), entry.path().to_path_buf()));
+                }
+                let current = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                on_progress(ScanProgress {
+                    done: current,
+                    total: total_children,
+                    name: child
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| child.display().to_string()),
+                });
+                found
+            })
             .flatten()
-        {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let metadata = match fs::symlink_metadata(entry.path()) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            by_size
-                .entry(metadata.len())
-                .or_default()
-                .push(entry.path().to_path_buf());
+            .collect();
+        let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+        for (size, path) in files {
+            by_size.entry(size).or_default().push(path);
         }
         let mut by_hash: HashMap<(u64, [u8; 32]), Vec<PathBuf>> = HashMap::new();
         for (size, paths) in by_size.into_iter().filter(|(_, paths)| paths.len() > 1) {
@@ -704,10 +796,23 @@ pub fn empty_quarantine(app_data: PathBuf) -> Result<(), String> {
     Engine::new(app_data).empty_quarantine()
 }
 
+#[allow(dead_code)]
 pub fn analyze_disk(app_data: PathBuf, root: Option<String>) -> Result<Vec<DiskEntry>, String> {
     Engine::new(app_data).analyze_disk(root.as_deref())
 }
 
+pub fn analyze_disk_with_progress<F>(
+    app_data: PathBuf,
+    root: Option<String>,
+    on_progress: F,
+) -> Result<Vec<DiskEntry>, String>
+where
+    F: Fn(ScanProgress) + Send + Sync,
+{
+    Engine::new(app_data).analyze_disk_with_progress(root.as_deref(), on_progress)
+}
+
+#[allow(dead_code)]
 pub fn find_large_files(
     app_data: PathBuf,
     root: Option<String>,
@@ -717,12 +822,43 @@ pub fn find_large_files(
     Engine::new(app_data).find_large_files(root.as_deref(), min_bytes, &entitlements)
 }
 
+pub fn find_large_files_with_progress<F>(
+    app_data: PathBuf,
+    root: Option<String>,
+    min_bytes: u64,
+    entitlements: Entitlements,
+    on_progress: F,
+) -> Result<Vec<LargeFile>, String>
+where
+    F: Fn(ScanProgress) + Send + Sync,
+{
+    Engine::new(app_data).find_large_files_with_progress(
+        root.as_deref(),
+        min_bytes,
+        &entitlements,
+        on_progress,
+    )
+}
+
+#[allow(dead_code)]
 pub fn find_duplicates(
     app_data: PathBuf,
     root: Option<String>,
     entitlements: Entitlements,
 ) -> Result<Vec<DuplicateGroup>, String> {
     Engine::new(app_data).find_duplicates(root.as_deref(), &entitlements)
+}
+
+pub fn find_duplicates_with_progress<F>(
+    app_data: PathBuf,
+    root: Option<String>,
+    entitlements: Entitlements,
+    on_progress: F,
+) -> Result<Vec<DuplicateGroup>, String>
+where
+    F: Fn(ScanProgress) + Send + Sync,
+{
+    Engine::new(app_data).find_duplicates_with_progress(root.as_deref(), &entitlements, on_progress)
 }
 
 pub fn quarantine_paths(
@@ -779,6 +915,19 @@ fn current_platform() -> &'static str {
     } else {
         "Linux"
     }
+}
+
+fn immediate_children(root: &Path) -> Result<Vec<PathBuf>, String> {
+    Ok(fs::read_dir(root)
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).ok()?;
+            (!metadata.file_type().is_symlink() && (metadata.is_dir() || metadata.is_file()))
+                .then_some(path)
+        })
+        .collect())
 }
 
 fn analysis_root(root: Option<&str>) -> Result<PathBuf, String> {

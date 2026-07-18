@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   BarChart3,
@@ -114,6 +115,7 @@ type DiskEntry = {
 };
 type LargeFile = { path: string; bytes: number; modified: number | null };
 type DuplicateGroup = { size: number; count: number; files: string[] };
+type ScanProgress = { done: number; total: number; name: string };
 type DuplicateRemoval = { group: string[]; remove: string[]; keep: string };
 type StartupItem = {
   id: string;
@@ -232,6 +234,9 @@ export default function App() {
   const [registryResult, setRegistryResult] = useState<RegistryScanResult | null>(null);
   const [registrySelected, setRegistrySelected] = useState<string[]>([]);
   const [registryCleaned, setRegistryCleaned] = useState<RegistryCleanResult | null>(null);
+  const [analyzerProgress, setAnalyzerProgress] = useState<ScanProgress | null>(null);
+  const [largeProgress, setLargeProgress] = useState<ScanProgress | null>(null);
+  const [duplicateProgress, setDuplicateProgress] = useState<ScanProgress | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -260,6 +265,27 @@ export default function App() {
       })
       .catch((reason) => setError(displayError(reason)))
       .finally(() => setBusy(null));
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const subscriptions = Promise.all([
+      listen<ScanProgress>("analyze://progress", (event) => {
+        if (!disposed) setAnalyzerProgress(event.payload);
+      }),
+      listen<ScanProgress>("large-files://progress", (event) => {
+        if (!disposed) setLargeProgress(event.payload);
+      }),
+      listen<ScanProgress>("duplicates://progress", (event) => {
+        if (!disposed) setDuplicateProgress(event.payload);
+      }),
+    ]);
+    return () => {
+      disposed = true;
+      void subscriptions.then((unlisten) => {
+        for (const dispose of unlisten) dispose();
+      });
+    };
   }, []);
 
   const allRules = useMemo(
@@ -342,6 +368,7 @@ export default function App() {
     setError(null);
     setFinderCleaned(null);
     setBusy("scanning");
+    setAnalyzerProgress({ done: 0, total: 0, name: "" });
     try {
       const nextPath = typeof path === "string" ? path : analyzerPath;
       setAnalyzerPath(nextPath);
@@ -349,6 +376,7 @@ export default function App() {
     } catch (reason) {
       setError(displayError(reason));
     } finally {
+      setAnalyzerProgress(null);
       setBusy(null);
     }
   };
@@ -356,6 +384,7 @@ export default function App() {
     setError(null);
     setFinderCleaned(null);
     setBusy("scanning");
+    setLargeProgress({ done: 0, total: 0, name: "" });
     try {
       const files = await invoke<LargeFile[]>("find_large_files", {
         path: largePath || null,
@@ -366,6 +395,7 @@ export default function App() {
     } catch (reason) {
       setError(displayError(reason));
     } finally {
+      setLargeProgress(null);
       setBusy(null);
     }
   };
@@ -373,6 +403,7 @@ export default function App() {
     setError(null);
     setFinderCleaned(null);
     setBusy("scanning");
+    setDuplicateProgress({ done: 0, total: 0, name: "" });
     try {
       const groups = await invoke<DuplicateGroup[]>("find_duplicates", {
         path: duplicatePath || null,
@@ -385,6 +416,7 @@ export default function App() {
     } catch (reason) {
       setError(displayError(reason));
     } finally {
+      setDuplicateProgress(null);
       setBusy(null);
     }
   };
@@ -581,6 +613,7 @@ export default function App() {
                 path={analyzerPath}
                 entries={analyzerEntries}
                 busy={busy}
+                progress={analyzerProgress}
                 error={error}
                 onPathChange={setAnalyzerPath}
                 onAnalyze={analyzeDisk}
@@ -595,6 +628,7 @@ export default function App() {
                 selected={selectedLarge}
                 cleaned={finderCleaned}
                 busy={busy}
+                progress={largeProgress}
                 error={error}
                 isPro={isPro}
                 onPathChange={setLargePath}
@@ -621,6 +655,7 @@ export default function App() {
                 removed={duplicateRemoved}
                 cleaned={finderCleaned}
                 busy={busy}
+                progress={duplicateProgress}
                 error={error}
                 isPro={isPro}
                 onPathChange={setDuplicatePath}
@@ -1449,9 +1484,30 @@ function FinderError({
   );
 }
 
+function FinderScanningState({
+  progress,
+  message,
+}: {
+  progress: ScanProgress | null;
+  message: string;
+}) {
+  const measured = progress?.total
+    ? `Measured ${progress.done} of ${progress.total} folders…`
+    : "Preparing the folder scan…";
+  return (
+    <output className="finder-scanning" aria-live="polite">
+      <LoaderCircle className="spin" size={22} />
+      <strong>{message}</strong>
+      <span>{measured}</span>
+      {progress?.name && <small>Current: {progress.name}</small>}
+    </output>
+  );
+}
+
 function AnalyzerScreen({
   path,
   entries,
+  progress,
   busy,
   error,
   onPathChange,
@@ -1461,6 +1517,7 @@ function AnalyzerScreen({
 }: {
   path: string;
   entries: DiskEntry[] | null;
+  progress: ScanProgress | null;
   busy: Busy;
   error: string | null;
   onPathChange: (value: string) => void;
@@ -1492,7 +1549,12 @@ function AnalyzerScreen({
           </div>
           {entries && <span className="result-count">{entries.length} items</span>}
         </div>
-        {!entries ? (
+        {busy === "scanning" ? (
+          <FinderScanningState
+            progress={progress}
+            message="Measuring folder sizes — large folders like your home or C: can take a minute"
+          />
+        ) : !entries ? (
           <div className="list-empty">
             <BarChart3 size={18} /> Choose a folder to see its storage breakdown.
           </div>
@@ -1560,6 +1622,7 @@ function LargeFilesScreen({
   path,
   threshold,
   files,
+  progress,
   selected,
   cleaned,
   busy,
@@ -1578,6 +1641,7 @@ function LargeFilesScreen({
   path: string;
   threshold: number;
   files: LargeFile[] | null;
+  progress: ScanProgress | null;
   selected: string[];
   cleaned: CleanReport | null;
   busy: Busy;
@@ -1642,7 +1706,12 @@ function LargeFilesScreen({
               </div>
               {files && <span className="result-count">{selected.length} selected</span>}
             </div>
-            {!files ? (
+            {busy === "scanning" ? (
+              <FinderScanningState
+                progress={progress}
+                message="Scanning for large files — large folders can take a minute"
+              />
+            ) : !files ? (
               <div className="list-empty">
                 <FileSearch size={18} /> Scan a folder to find large files.
               </div>
@@ -1700,6 +1769,7 @@ function LargeFilesScreen({
 function DuplicatesScreen({
   path,
   groups,
+  progress,
   keep,
   removed,
   cleaned,
@@ -1718,6 +1788,7 @@ function DuplicatesScreen({
 }: {
   path: string;
   groups: DuplicateGroup[] | null;
+  progress: ScanProgress | null;
   keep: Record<number, string>;
   removed: Record<number, string[]>;
   cleaned: CleanReport | null;
@@ -1769,7 +1840,12 @@ function DuplicatesScreen({
               </div>
               {groups && <span className="result-count">{selectedCount} selected</span>}
             </div>
-            {!groups ? (
+            {busy === "scanning" ? (
+              <FinderScanningState
+                progress={progress}
+                message="Checking files for duplicates — hashing can take a minute"
+              />
+            ) : !groups ? (
               <div className="list-empty">
                 <Files size={18} /> Scan a folder to find identical files.
               </div>

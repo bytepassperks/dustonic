@@ -1,5 +1,5 @@
 use std::fs;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 mod app_dirs;
 mod engine;
@@ -127,7 +127,10 @@ fn clean_registry(
 
 #[tauri::command]
 fn analyze_disk(app: AppHandle, path: Option<String>) -> Result<Vec<engine::DiskEntry>, String> {
-    engine::analyze_disk(app_data(&app)?, path)
+    let event_app = app.clone();
+    engine::analyze_disk_with_progress(app_data(&app)?, path, move |progress| {
+        let _ = event_app.emit("analyze://progress", progress);
+    })
 }
 
 #[tauri::command]
@@ -138,7 +141,16 @@ fn find_large_files(
 ) -> Result<Vec<engine::LargeFile>, String> {
     let data_dir = app_data(&app)?;
     let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
-    engine::find_large_files(data_dir, path, min_bytes, entitlements)
+    let event_app = app.clone();
+    engine::find_large_files_with_progress(
+        data_dir,
+        path,
+        min_bytes,
+        entitlements,
+        move |progress| {
+            let _ = event_app.emit("large-files://progress", progress);
+        },
+    )
 }
 
 #[tauri::command]
@@ -148,7 +160,10 @@ fn find_duplicates(
 ) -> Result<Vec<engine::DuplicateGroup>, String> {
     let data_dir = app_data(&app)?;
     let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
-    engine::find_duplicates(data_dir, path, entitlements)
+    let event_app = app.clone();
+    engine::find_duplicates_with_progress(data_dir, path, entitlements, move |progress| {
+        let _ = event_app.emit("duplicates://progress", progress);
+    })
 }
 
 #[tauri::command]

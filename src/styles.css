@@ -256,6 +256,36 @@ label:focus-visible {
   background: var(--card);
   box-shadow: 0 8px 24px rgb(23 35 39 / 8%);
 }
+
+.finder-scanning {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 24px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.finder-scanning strong {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.finder-scanning span {
+  font-size: 12px;
+}
+
+.finder-scanning small {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .app-error-mark {
   display: grid;
   place-items: center;
