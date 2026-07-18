@@ -999,7 +999,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.13</span>
+        <span className="rail-version">0.2.14</span>
       </div>
     </nav>
   );
@@ -2833,7 +2833,7 @@ function SettingsScreen({
           <Info size={15} />
           <span>
             <strong>Dustonic 0.2.7</strong>
-            <small>Open source · Windows and Linux · No telemetry</small>
+            <small>Windows and Linux · No telemetry</small>
           </span>
         </div>
       </section>

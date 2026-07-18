@@ -50,4 +50,5 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cd website && npm install && npm test
 ```
 
-Dustonic is licensed under AGPL-3.0.
+Dustonic is proprietary commercial software. Use is subject to the Dustonic
+Proprietary Software License and applicable purchase terms.

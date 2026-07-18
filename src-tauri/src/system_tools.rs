@@ -446,6 +446,50 @@ mod platform {
         command
     }
 
+    fn parse_uninstall_command(command: &str) -> Option<(String, Vec<String>)> {
+        let mut values = Vec::new();
+        let mut current = String::new();
+        let mut chars = command.trim().chars().peekable();
+        let mut quoted = false;
+
+        while let Some(character) = chars.next() {
+            match character {
+                '"' => quoted = !quoted,
+                '\\' => {
+                    let mut slashes = 1;
+                    while chars.peek() == Some(&'\\') {
+                        chars.next();
+                        slashes += 1;
+                    }
+                    if chars.peek() == Some(&'"') {
+                        chars.next();
+                        current.extend(std::iter::repeat_n('\\', slashes / 2));
+                        if slashes % 2 == 1 {
+                            current.push('"');
+                        } else {
+                            quoted = !quoted;
+                        }
+                    } else {
+                        current.extend(std::iter::repeat_n('\\', slashes));
+                    }
+                }
+                character if character.is_whitespace() && !quoted => {
+                    if !current.is_empty() {
+                        values.push(std::mem::take(&mut current));
+                    }
+                }
+                character => current.push(character),
+            }
+        }
+        if !current.is_empty() {
+            values.push(current);
+        }
+
+        values
+            .split_first()
+            .map(|(executable, arguments)| (executable.clone(), arguments.to_vec()))
+    }
+
     pub(super) fn list_startup_items(_app_data: PathBuf) -> Result<Vec<StartupItem>, String> {
         let mut items = Vec::new();
         for (root, root_name) in [(HKEY_CURRENT_USER, "HKCU"), (HKEY_LOCAL_MACHINE, "HKLM")] {
@@ -681,10 +725,19 @@ mod platform {
         let command: String = key
             .get_value("UninstallString")
             .map_err(|error| error.to_string())?;
-        hidden_command("cmd")
-            .args(["/C", &command])
+        let Some((executable, arguments)) = parse_uninstall_command(&command) else {
+            return Ok(UninstallResult {
+                supported: true,
+                launched: false,
+                command: Some(command),
+                message: "The uninstall command could not be parsed. Copy it and run it manually."
+                    .into(),
+            });
+        };
+        Command::new(&executable)
+            .args(arguments)
             .spawn()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("Could not launch {executable}: {error}"))?;
         Ok(UninstallResult {
             supported: true,
             launched: true,
