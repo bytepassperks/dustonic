@@ -311,7 +311,7 @@ label:focus-visible {
 
 .clean-screen,
 .settings-screen {
-  width: min(100%, 980px);
+  width: min(100%, 1280px);
   margin: 0 auto;
 }
 .screen-titlebar,
@@ -836,7 +836,7 @@ label:focus-visible {
   font-size: 10px;
 }
 .finder-screen {
-  width: min(100%, 980px);
+  width: min(100%, 1280px);
   margin: 0 auto;
 }
 .finder-heading {
@@ -1173,7 +1173,7 @@ label:focus-visible {
   background: color-mix(in srgb, var(--success) 4%, var(--card));
 }
 .system-screen {
-  width: min(100%, 980px);
+  width: min(100%, 1280px);
   margin: 0 auto;
 }
 .system-toolbar {
@@ -1517,6 +1517,55 @@ label:focus-visible {
 .about-row {
   border-bottom: 0;
   color: var(--muted-foreground);
+}
+
+@media (min-width: 761px) {
+  .app-content {
+    font-size: 14px;
+  }
+
+  .app-content :where(p, label, input, button) {
+    font-size: 13px;
+  }
+
+  .app-content :where(small) {
+    font-size: 12px;
+  }
+
+  .app-content :where(.eyebrow) {
+    font-size: 10px;
+  }
+
+  .app-content :where(.tag, .result-count, .rail-version, .breadcrumb, .protected-status) {
+    font-size: 12px;
+  }
+
+  .app-content .screen-titlebar p,
+  .app-content .screen-heading p,
+  .app-content .finder-heading p,
+  .app-content .finder-list-header p,
+  .app-content .list-toolbar p {
+    font-size: 13px;
+  }
+
+  .app-content .rule-info strong,
+  .app-content .group-header strong,
+  .app-content .result-size strong,
+  .app-content .analysis-copy strong,
+  .app-content .finder-file-copy strong,
+  .app-content .duplicate-group-header strong {
+    font-size: 13px;
+  }
+
+  .app-content .rule-info small,
+  .app-content .group-header small,
+  .app-content .result-size small,
+  .app-content .finder-file-copy small,
+  .app-content .duplicate-group-header span,
+  .app-content .list-empty,
+  .app-content .notice {
+    font-size: 12px;
+  }
 }
 
 .spin {
