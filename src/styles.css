@@ -2287,3 +2287,178 @@ label:focus-visible {
     width: 100%;
   }
 }
+
+/* Viewport containment: keep the native shell inside the webview client area. */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body {
+  min-height: 0;
+}
+
+.desktop-app,
+.app-rail {
+  height: 100%;
+  min-height: 0;
+}
+
+.desktop-app,
+.app-pane,
+.app-content,
+.clean-screen,
+.settings-screen,
+.finder-screen,
+.system-screen,
+.smart-panel,
+.smart-review,
+.list-panel,
+.finder-list-panel {
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.app-pane {
+  height: 100%;
+  min-height: 0;
+}
+
+.app-content > *,
+.clean-screen > *,
+.settings-screen > *,
+.finder-screen > *,
+.system-screen > * {
+  min-width: 0;
+}
+
+.clean-screen,
+.settings-screen,
+.finder-screen,
+.system-screen {
+  height: 100%;
+  overflow: hidden;
+}
+
+.clean-screen > .list-panel,
+.clean-screen > .completion,
+.finder-screen > .finder-list-panel,
+.finder-screen > .smart-panel,
+.finder-screen > .smart-review,
+.system-screen > .system-groups,
+.settings-screen > .settings-grid {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.finder-list-panel,
+.list-panel,
+.smart-panel,
+.smart-review {
+  max-height: 100%;
+}
+
+.finder-list-panel {
+  min-height: 0;
+}
+
+.completion {
+  min-height: 0;
+}
+
+.app-error-state {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.list-empty,
+.system-empty {
+  min-height: 0;
+}
+
+.bottom-action {
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 10px 0 0;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.bottom-action > * {
+  min-width: 0;
+}
+
+.bottom-action span,
+.bottom-action strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-action-bar {
+  max-width: 100%;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.settings-grid,
+.system-groups,
+.rule-groups,
+.analysis-items,
+.startup-items,
+.app-items,
+.registry-items,
+.smart-review-list,
+.duplicate-groups {
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-grid {
+  overflow: auto;
+}
+
+.system-groups,
+.rule-groups {
+  overflow: auto;
+}
+
+.finder-controls,
+.system-toolbar,
+.finder-list-header,
+.list-toolbar,
+.screen-titlebar,
+.screen-heading,
+.finder-heading {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.finder-controls > *,
+.system-toolbar > *,
+.screen-titlebar > *,
+.screen-heading > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.finder-file-copy,
+.analysis-copy,
+.app-row .finder-file-copy,
+.startup-row .finder-file-copy,
+.registry-reason {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
