@@ -1655,6 +1655,7 @@ function AnalyzerScreen({
   onRestore: () => void;
   onDismissError: () => void;
 }) {
+  const totalBytes = entries?.reduce((total, entry) => total + entry.bytes, 0) ?? 0;
   return (
     <div className="finder-screen">
       <FinderHeading
@@ -1677,7 +1678,11 @@ function AnalyzerScreen({
             <h2>{path || "User home directory"}</h2>
             <p>Immediate children · sorted largest first · quarantine-first cleanup</p>
           </div>
-          {entries && <span className="result-count">{entries.length} items</span>}
+          {entries && (
+            <span className="result-count">
+              {entries.length} items · {formatBytes(totalBytes)}
+            </span>
+          )}
         </div>
         {busy === "scanning" ? (
           <FinderScanningState
@@ -1985,6 +1990,7 @@ function LargeFilesScreen({
   onUpgrade: () => void;
   onDismissError: () => void;
 }) {
+  const totalBytes = files?.reduce((total, file) => total + file.bytes, 0) ?? 0;
   return (
     <div className="finder-screen">
       <FinderHeading
@@ -2029,7 +2035,11 @@ function LargeFilesScreen({
           <div className="finder-list-panel">
             <div className="finder-list-header">
               <div>
-                <h2>{files ? `${files.length} large files found` : "No scan yet"}</h2>
+                <h2>
+                  {files
+                    ? `${files.length} large files · ${formatBytes(totalBytes)}`
+                    : "No scan yet"}
+                </h2>
                 <p>Top 200 results · files move to quarantine before removal</p>
               </div>
               {files && <span className="result-count">{selected.length} selected</span>}
@@ -2134,6 +2144,8 @@ function DuplicatesScreen({
   onDismissError: () => void;
 }) {
   const selectedCount = Object.values(removed).reduce((sum, values) => sum + values.length, 0);
+  const totalReclaimable =
+    groups?.reduce((total, group) => total + group.size * Math.max(group.count - 1, 0), 0) ?? 0;
   return (
     <div className="finder-screen">
       <FinderHeading
@@ -2163,7 +2175,11 @@ function DuplicatesScreen({
           <div className="finder-list-panel">
             <div className="finder-list-header">
               <div>
-                <h2>{groups ? `${groups.length} duplicate groups` : "No scan yet"}</h2>
+                <h2>
+                  {groups
+                    ? `${groups.length} duplicate groups · ${formatBytes(totalReclaimable)} reclaimable`
+                    : "No scan yet"}
+                </h2>
                 <p>Identical content · one copy is always kept</p>
               </div>
               {groups && <span className="result-count">{selectedCount} selected</span>}
@@ -2355,6 +2371,8 @@ function AppsScreen({
   const filtered = programs?.filter((program) =>
     `${program.name} ${program.publisher ?? ""}`.toLowerCase().includes(search.toLowerCase()),
   );
+  const knownSize =
+    filtered?.reduce((total, program) => total + (program.estimated_size ?? 0), 0) ?? 0;
   return (
     <div className="system-screen">
       <FinderHeading
@@ -2386,7 +2404,11 @@ function AppsScreen({
       <div className="finder-list-panel">
         <div className="finder-list-header">
           <div>
-            <h2>{filtered ? `${filtered.length} applications` : "No scan yet"}</h2>
+            <h2>
+              {filtered
+                ? `${filtered.length} applications · ${formatBytes(knownSize)} known size`
+                : "No scan yet"}
+            </h2>
             <p>Uninstall actions are explicit and never silently remove files.</p>
           </div>
         </div>
@@ -2413,12 +2435,12 @@ function AppsScreen({
                       .join(" · ") || "No additional metadata"}
                   </small>
                 </span>
-                {program.estimated_size && (
-                  <span className="result-size">
-                    <strong>{formatBytes(program.estimated_size)}</strong>
-                    <small>estimated</small>
-                  </span>
-                )}
+                <span className="result-size">
+                  <strong>
+                    {program.estimated_size != null ? formatBytes(program.estimated_size) : "—"}
+                  </strong>
+                  <small>{program.estimated_size != null ? "estimated" : "size unknown"}</small>
+                </span>
                 <button
                   type="button"
                   className="secondary-button app-action"
