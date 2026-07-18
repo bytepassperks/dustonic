@@ -999,7 +999,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.12</span>
+        <span className="rail-version">0.2.13</span>
       </div>
     </nav>
   );
@@ -1266,9 +1266,11 @@ function RuleList({
         onClearAll={onClearAll}
       />
       <TableHeader className="rules-table-header">
+        <span />
         <span>Rule</span>
-        <span>Scope</span>
         <span>Risk</span>
+        <span>Access</span>
+        <span>Action</span>
       </TableHeader>
       <div className="rule-groups">
         {catalog.categories.map((category) => (
@@ -1335,8 +1337,10 @@ function ResultsList({
         }
       />
       <TableHeader className="rules-table-header">
+        <span />
         <span>Rule</span>
-        <span>Items</span>
+        <span>Risk</span>
+        <span>Access</span>
         <span>Size</span>
       </TableHeader>
       <div className="rule-groups">
@@ -2226,9 +2230,9 @@ function DuplicatesScreen({
               {groups && <span className="result-count">{selectedCount} selected</span>}
             </div>
             <TableHeader className="duplicate-table-header">
-              <span>Group</span>
-              <span>Copies</span>
-              <span>Reclaimable</span>
+              <span />
+              <span>File</span>
+              <span>Action</span>
             </TableHeader>
             {busy === "scanning" ? (
               <FinderScanningState
