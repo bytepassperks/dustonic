@@ -860,7 +860,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.1</span>
+        <span className="rail-version">0.2.2</span>
       </div>
     </nav>
   );
@@ -2397,7 +2397,7 @@ function SettingsScreen({
         <div className="about-row">
           <Info size={15} />
           <span>
-            <strong>Dustonic 0.2.1</strong>
+            <strong>Dustonic 0.2.2</strong>
             <small>Open source · Windows and Linux · No telemetry</small>
           </span>
         </div>

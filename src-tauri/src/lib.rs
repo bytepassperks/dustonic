@@ -18,14 +18,14 @@ fn get_rule_catalog(app: AppHandle) -> Result<engine::Catalog, String> {
     Ok(engine::catalog(app_data(&app)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_rules(app: AppHandle, rule_ids: Vec<String>) -> Result<engine::ScanReport, String> {
     let data_dir = app_data(&app)?;
     let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
     engine::scan(data_dir, rule_ids, entitlements)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clean_rules(
     app: AppHandle,
     rule_ids: Vec<String>,
@@ -53,12 +53,12 @@ fn deactivate_license(app: AppHandle) -> Result<license::LicenseStatus, String> 
     license::LicenseManager::new(app_data(&app)?).deactivate()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn restore_last_quarantine(app: AppHandle) -> Result<engine::CleanReport, String> {
     engine::restore_last(app_data(&app)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn empty_quarantine(app: AppHandle) -> Result<(), String> {
     engine::empty_quarantine(app_data(&app)?)
 }
@@ -68,22 +68,22 @@ fn get_system_stats() -> engine::SystemStats {
     engine::stats()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn flush_dns() -> Result<(), String> {
     engine::flush_dns()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn empty_trash() -> Result<(), String> {
     engine::empty_trash()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_startup_items(app: AppHandle) -> Result<Vec<system_tools::StartupItem>, String> {
     system_tools::list_startup_items(app_data(&app)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_startup_item_enabled(
     app: AppHandle,
     id: String,
@@ -92,17 +92,17 @@ fn set_startup_item_enabled(
     system_tools::set_startup_item_enabled(app_data(&app)?, id, enabled)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_installed_programs() -> Result<Vec<system_tools::InstalledProgram>, String> {
     system_tools::list_installed_programs()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn uninstall_program(id: String) -> Result<system_tools::UninstallResult, String> {
     system_tools::uninstall_program(id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_registry(app: AppHandle) -> Result<system_tools::RegistryScanResult, String> {
     let data_dir = app_data(&app)?;
     let entitlements = license::LicenseManager::new(data_dir.clone()).current_entitlements();
@@ -112,7 +112,7 @@ fn scan_registry(app: AppHandle) -> Result<system_tools::RegistryScanResult, Str
     system_tools::scan_registry(data_dir)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clean_registry(
     app: AppHandle,
     finding_ids: Vec<String>,
@@ -125,7 +125,7 @@ fn clean_registry(
     system_tools::clean_registry(data_dir, finding_ids)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn analyze_disk(app: AppHandle, path: Option<String>) -> Result<Vec<engine::DiskEntry>, String> {
     let event_app = app.clone();
     engine::analyze_disk_with_progress(app_data(&app)?, path, move |progress| {
@@ -133,7 +133,7 @@ fn analyze_disk(app: AppHandle, path: Option<String>) -> Result<Vec<engine::Disk
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn find_large_files(
     app: AppHandle,
     path: Option<String>,
@@ -153,7 +153,7 @@ fn find_large_files(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn find_duplicates(
     app: AppHandle,
     path: Option<String>,
@@ -166,7 +166,7 @@ fn find_duplicates(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn quarantine_paths(
     app: AppHandle,
     paths: Vec<String>,
@@ -180,7 +180,7 @@ fn quarantine_paths(
     engine::quarantine_paths(data_dir, paths, keep_paths)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn quarantine_duplicate_files(
     app: AppHandle,
     selections: Vec<engine::DuplicateRemoval>,
