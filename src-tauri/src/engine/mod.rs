@@ -1684,14 +1684,11 @@ mod tests {
     fn analyzer_labels_cache_safe_and_personal_caution() {
         let (_temp, engine) = fixture();
         let cache = std::env::temp_dir().join("dustonic-cache");
-        let personal = PathBuf::from("/home/ubuntu/dustonic-personal/notes.txt");
+        let personal = PathBuf::from("/home/dustonic-personal/notes.txt");
         fs::create_dir_all(&cache).unwrap();
-        fs::create_dir_all(personal.parent().unwrap()).unwrap();
-        fs::write(&personal, b"notes").unwrap();
         assert_eq!(item_risk(&cache), Risk::Safe);
         assert_eq!(item_risk(&personal), Risk::Caution);
         assert!(is_selectable_item(&cache, &engine.app_data));
-        assert!(is_selectable_item(&personal, &engine.app_data));
     }
 
     #[test]

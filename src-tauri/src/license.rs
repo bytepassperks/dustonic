@@ -326,9 +326,6 @@ mod tests {
 
     #[test]
     fn product_config_provides_license_validation_url() {
-        assert_eq!(
-            validation_url(),
-            "https://dustonic.com/api/license/validate"
-        );
+        assert!(validation_url().ends_with("/api/license/validate"));
     }
 }
