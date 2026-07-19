@@ -2313,6 +2313,7 @@ body,
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -2343,6 +2344,7 @@ body {
 .app-content {
   overflow-x: hidden;
   overflow-y: hidden;
+  overscroll-behavior: none;
 }
 
 .app-pane {
@@ -2438,21 +2440,27 @@ body {
 .app-items,
 .registry-items,
 .smart-review-list,
-.duplicate-groups {
+.duplicate-groups,
+.smart-paths {
   min-width: 0;
   min-height: 0;
   max-width: 100%;
+  overscroll-behavior: none;
+  background: var(--card);
 }
 
 .settings-grid {
   overflow-x: hidden;
   overflow-y: auto;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .system-groups,
 .rule-groups {
   overflow-x: hidden;
   overflow-y: auto;
+  margin-top: 0;
 }
 
 .analysis-items,
@@ -2463,6 +2471,17 @@ body {
 .duplicate-groups {
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.duplicate-groups {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.smart-paths {
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 0;
 }
 
 .finder-controls,
