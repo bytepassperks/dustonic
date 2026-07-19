@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: dustonic-website
+    runtime: node
+    plan: starter
+    rootDir: website
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22.18.0"
+      - key: SITE_URL
+        value: https://dustonic.com
+      - key: CONTACT_TO
+        value: hello@dustonic.com
+      - key: CONTACT_FROM
+        sync: false
+      - key: MAILGUN_API_KEY
+        sync: false
+      - key: MAILGUN_DOMAIN
+        sync: false
+      - key: MAILGUN_BASE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: DATA_DIR
+        sync: false
+      - key: DODO_WEBHOOK_SECRET
+        sync: false
+      - key: DODO_PAYMENTS_API_KEY
+        sync: false
+      - key: DODO_MODE
+        sync: false
+      - key: DODO_PRO_PRODUCT_IDS
+        sync: false
+      - key: DODO_DEFAULT_TIER
+        sync: false
+      - key: DODO_CHECKOUT_PRO_MONTHLY
+        sync: false
+      - key: DODO_CHECKOUT_PRO_ANNUAL
+        sync: false
