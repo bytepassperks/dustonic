@@ -999,7 +999,7 @@ function AppRail({
         >
           <Settings2 size={19} />
         </RailButton>
-        <span className="rail-version">0.2.15</span>
+        <span className="rail-version">0.2.16</span>
       </div>
     </nav>
   );
